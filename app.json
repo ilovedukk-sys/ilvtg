@@ -1,0 +1,6 @@
+{
+  "display_name": "ilvtg",
+  "bundle_id": "org.ilvtg.client",
+  "url_scheme": "ilvtg",
+  "app_extensions": false
+}

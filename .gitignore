@@ -1,0 +1,13 @@
+# Upstream checkout and build outputs
+/telegram/
+/out/
+*.ipa
+*.tipa
+__pycache__/
+*.pyc
+.DS_Store
+
+# Local secrets must never be committed
+*.mobileprovision
+*.p12
+.env

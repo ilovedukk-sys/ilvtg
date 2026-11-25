@@ -1,0 +1,118 @@
+name: iOS build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/**
+      - ci/**
+      - app.json
+      - upstream.json
+      - .github/workflows/ios.yml
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: release_arm64 = optimized IPA; debug_arm64 = faster compile, much larger IPA
+        type: choice
+        default: release_arm64
+        options: [release_arm64, debug_arm64]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUNBUFFERED: "1"
+  CONFIGURATION: ${{ inputs.configuration || 'release_arm64' }}
+
+jobs:
+  # Cheap and fast: proves every ilvtg edit still applies to the pinned upstream commit.
+  patches:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pinned Telegram-iOS
+        run: |
+          set -euo pipefail
+          repo=$(python3 -c 'import json; print(json.load(open("upstream.json"))["repository"])')
+          commit=$(python3 -c 'import json; print(json.load(open("upstream.json"))["commit"])')
+          git init -q telegram
+          git -C telegram remote add origin "$repo"
+          git -C telegram fetch -q --depth=1 origin "$commit"
+          git -C telegram checkout -q --detach FETCH_HEAD
+      - name: Apply ilvtg changes
+        run: |
+          python3 ci/prepare.py telegram
+          git -C telegram diff --check
+          git -C telegram status --short
+
+  build:
+    needs: patches
+    runs-on: xcode-27
+    timeout-minutes: 340
+    env:
+      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pinned Telegram-iOS
+        run: |
+          set -euo pipefail
+          repo=$(python3 -c 'import json; print(json.load(open("upstream.json"))["repository"])')
+          commit=$(python3 -c 'import json; print(json.load(open("upstream.json"))["commit"])')
+          git init -q telegram
+          git -C telegram remote add origin "$repo"
+          git -C telegram fetch -q --depth=1 origin "$commit"
+          git -C telegram checkout -q --detach FETCH_HEAD
+      - name: Free disk space
+        continue-on-error: true
+        run: |
+          df -h /
+          required=$(python3 -c 'import json; print(json.load(open("telegram/versions.json"))["xcode"])')
+          for app in /Applications/Xcode*.app; do
+            case "$app" in
+              "/Applications/Xcode_${required}.app"|/Applications/Xcode.app) ;;
+              *) sudo rm -rf "$app" ;;
+            esac
+          done
+          sudo rm -rf ~/Library/Android /usr/local/share/dotnet ~/.dotnet || true
+          df -h /
+      - name: Toolchain
+        run: bash ci/macos_setup.sh telegram
+      - name: Apply ilvtg changes
+        run: python3 ci/prepare.py telegram
+      - name: Fetch native dependencies
+        run: |
+          set -euo pipefail
+          git -C telegram submodule update --init --recursive --jobs=8 --depth=1 \
+            || git -C telegram submodule update --init --recursive --jobs=8
+          df -h /
+      - name: Restore Bazel cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/bazel-cache
+          key: bazel-${{ env.CONFIGURATION }}-${{ hashFiles('upstream.json') }}-${{ github.sha }}
+          restore-keys: |
+            bazel-${{ env.CONFIGURATION }}-${{ hashFiles('upstream.json') }}-
+      - name: Build
+        run: python3 -u ci/build.py telegram --configuration "$CONFIGURATION" --cache-dir "$RUNNER_TEMP/bazel-cache" --out "$RUNNER_TEMP/out"
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: ilvtg-ios-${{ env.CONFIGURATION }}-${{ github.run_number }}
+          path: |
+            ${{ runner.temp }}/out/*.ipa
+            ${{ runner.temp }}/out/manifest.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Shrink cache before saving
+        if: always()
+        continue-on-error: true
+        run: |
+          cd telegram
+          for bazel in build-input/bazel-*; do [ -x "$bazel" ] && "$bazel" shutdown || true; done
+          du -sh "$RUNNER_TEMP/bazel-cache" || true
