@@ -156,6 +156,33 @@ def settings_screen(t: Tree):
            "    pushControllerImpl = { [weak controller] c, animated in\n")
 
 
+def sideload_compat(t: Tree):
+    # Sideloading tools re-sign the app, often without the App Group entitlement. Upstream then
+    # stops launching before the window is shown ("Error 2" on a hidden window = black screen).
+    # The main app does not need a shared container without extensions: fall back to a private
+    # directory inside the app sandbox, excluded from iCloud backup.
+    f = "submodules/TelegramUI/Sources/AppDelegate.swift"
+    t.edit("container-fallback", f,
+           "        let maybeAppGroupUrl = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupName)\n",
+           "        let maybeAppGroupUrl: URL? = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupName) ?? { () -> URL? in\n"
+           "            guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {\n"
+           "                return nil\n"
+           "            }\n"
+           "            var url = base.appendingPathComponent(\"ilvtg-container\", isDirectory: true)\n"
+           "            guard (try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true, attributes: nil)) != nil else {\n"
+           "                return nil\n"
+           "            }\n"
+           "            var values = URLResourceValues()\n"
+           "            values.isExcludedFromBackup = true\n"
+           "            _ = try? url.setResourceValues(values)\n"
+           "            return url\n"
+           "        }()\n")
+    t.edit("visible-launch-error", f,
+           "            self.mainWindow?.presentNative(UIAlertController(title: nil, message: \"Error 2\", preferredStyle: .alert))\n",
+           "            self.window?.makeKeyAndVisible()\n"
+           "            self.mainWindow?.presentNative(UIAlertController(title: nil, message: \"Error 2: no writable data container\", preferredStyle: .alert))\n")
+
+
 def branding(t: Tree, app: dict):
     name = app["display_name"]
     if not name or "<" in name or "&" in name:
@@ -209,6 +236,7 @@ def main():
     privacy_layer(t)
     privacy_defaults(t)
     settings_screen(t)
+    sideload_compat(t)
     branding(t, app)
     build_tweaks(t, app)
 
