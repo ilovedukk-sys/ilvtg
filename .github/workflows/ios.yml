@@ -91,11 +91,13 @@ jobs:
           git -C telegram submodule update --init --recursive --jobs=8 --depth=1 \
             || git -C telegram submodule update --init --recursive --jobs=8
           df -h /
+      # Restore and save are separate steps so that a failed build still keeps
+      # everything it compiled: the next run only redoes what changed.
       - name: Restore Bazel cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/bazel-cache
-          key: bazel-${{ env.CONFIGURATION }}-${{ hashFiles('upstream.json') }}-${{ github.sha }}
+          key: bazel-${{ env.CONFIGURATION }}-${{ hashFiles('upstream.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             bazel-${{ env.CONFIGURATION }}-${{ hashFiles('upstream.json') }}-
       - name: Build
@@ -116,3 +118,9 @@ jobs:
           cd telegram
           for bazel in build-input/bazel-*; do [ -x "$bazel" ] && "$bazel" shutdown || true; done
           du -sh "$RUNNER_TEMP/bazel-cache" || true
+      - name: Save Bazel cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/bazel-cache
+          key: bazel-${{ env.CONFIGURATION }}-${{ hashFiles('upstream.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
