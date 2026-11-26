@@ -68,8 +68,8 @@ func ilvGhostNavigationButton(context: AccountContext, presentationInterfaceStat
     item.ilvGhostEnabled = enabled
     item.ilvTheme = theme
 
-    weak var controller = target as? ChatControllerImpl
-    let ghostTarget = IlvGhostButtonTarget(action: {
+    let controller = target as? ChatControllerImpl
+    let ghostTarget = IlvGhostButtonTarget(action: { [weak controller] in
         guard let controller = controller else {
             return
         }
