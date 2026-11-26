@@ -13,6 +13,7 @@ import Foundation
 import Postbox
 import SwiftSignalKit
 import MtProtoKit
+import CryptoKit
 internal import TelegramApi
 
 public enum IlvPrivacyOption: String, CaseIterable {
@@ -36,12 +37,18 @@ public enum IlvPrivacyOption: String, CaseIterable {
     case replayViewOnce
     /// Faces in recorded video messages are pixelated before sending.
     case blurFacesInVideoMessages
+    /// Phone numbers, usernames and ids are hidden until tapped.
+    case streamerMode
+    /// An "ID" row in every profile.
+    case showPeerId
+    /// Cherry instead of blue as the default accent color of the built-in themes.
+    case cherryAccent
 
     public var defaultValue: Bool {
         switch self {
-        case .blockSponsored, .showChatGhostButton, .keepDeletedMessages, .keepSelfDestructing, .replayViewOnce:
+        case .blockSponsored, .showChatGhostButton, .keepDeletedMessages, .keepSelfDestructing, .replayViewOnce, .showPeerId, .cherryAccent:
             return true
-        case .hideReadReceipts, .hideStoryViews, .hideOnlineStatus, .hideTyping, .blurFacesInVideoMessages:
+        case .hideReadReceipts, .hideStoryViews, .hideOnlineStatus, .hideTyping, .blurFacesInVideoMessages, .streamerMode:
             return false
         }
     }
@@ -152,6 +159,37 @@ public enum IlvGhost {
     /// Presence ping: "offline" instead of "online" while ghost mode hides the online status.
     static var reportsOffline: Bool {
         return IlvPrivacy.isEnabled(.hideOnlineStatus)
+    }
+}
+
+/// Methods after which the server marks the account online by itself.
+private let ilvOnlineMarkingMethods: Set<String> = [
+    "messagessendmessage",
+    "messagessendmedia",
+    "messagessendmultimedia",
+    "messagesforwardmessages",
+    "messagessendinlinebotresult",
+    "messagessendreaction",
+    "messagessendvote",
+    "messageseditmessage",
+    "messagessendscreenshotnotification",
+    "storiessendstory"
+]
+
+/// Called for every outgoing request (edit "network-guard"). After sending a message the server
+/// shows the account as online; while "hide online" is on, an offline status follows right after
+/// the message so the online mark lasts a moment instead of minutes.
+func ilvNoteRequest(_ name: String, network: Network) {
+    if !IlvGhost.reportsOffline || !ilvOnlineMarkingMethods.contains(ilvNormalizeMethodName(name)) {
+        return
+    }
+    for delay in [0.4, 1.5, 4.0] {
+        Queue.concurrentDefaultQueue().after(delay, { [weak network] in
+            guard let network = network else {
+                return
+            }
+            let _ = network.request(Api.functions.account.updateStatus(offline: .boolTrue)).start()
+        })
     }
 }
 
@@ -317,4 +355,198 @@ func ilvSkipsConsumption(_ message: Message) -> Bool {
         }
     }
     return false
+}
+
+// MARK: - Location emulation
+
+/// A fixed location reported instead of the device's GPS: in the location picker ("send my current
+/// location"), for live locations and everywhere else the app asks DeviceLocationManager.
+/// DeviceLocationManager reads the same UserDefaults keys directly (it does not link TelegramCore).
+public enum IlvLocationEmulation {
+    private static let enabledKey = "ilvtg.location.enabled"
+    private static let latitudeKey = "ilvtg.location.lat"
+    private static let longitudeKey = "ilvtg.location.lon"
+    private static let versionPromise = ValuePromise<Int>(0, ignoreRepeated: false)
+    private static let versionCounter = Atomic<Int>(value: 0)
+
+    public static var isEnabled: Bool {
+        return UserDefaults.standard.bool(forKey: enabledKey)
+    }
+
+    /// (latitude, longitude) while emulation is on.
+    public static var coordinate: (Double, Double)? {
+        if !isEnabled {
+            return nil
+        }
+        return (UserDefaults.standard.double(forKey: latitudeKey), UserDefaults.standard.double(forKey: longitudeKey))
+    }
+
+    public static func enable(latitude: Double, longitude: Double) {
+        UserDefaults.standard.set(latitude, forKey: latitudeKey)
+        UserDefaults.standard.set(longitude, forKey: longitudeKey)
+        UserDefaults.standard.set(true, forKey: enabledKey)
+        notify()
+    }
+
+    public static func disable() {
+        UserDefaults.standard.set(false, forKey: enabledKey)
+        notify()
+    }
+
+    private static func notify() {
+        versionPromise.set(versionCounter.modify { $0 + 1 })
+    }
+
+    /// Fires on subscription and on every change.
+    public static var updates: Signal<Void, NoError> {
+        return versionPromise.get() |> map { _ in Void() }
+    }
+}
+
+// MARK: - Fake passcode
+
+/// A second app passcode. Entering it on the lock screen logs every account out on the server,
+/// wipes all local data and, if chosen, deletes the Telegram accounts for good.
+public enum IlvDuress {
+    public enum Action: Int {
+        case logout = 0
+        case deleteAccounts = 1
+    }
+
+    private static let hashKey = "ilvtg.duress.hash"
+    private static let actionKey = "ilvtg.duress.action"
+    private static let pendingDeletionKey = "ilvtg.duress.pendingDeletion"
+
+    private static func hash(_ code: String) -> String {
+        let digest = SHA256.hash(data: Data(("ilvtg-duress:" + code).utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    public static var isSet: Bool {
+        return UserDefaults.standard.string(forKey: hashKey) != nil
+    }
+
+    public static func set(code: String) {
+        UserDefaults.standard.set(hash(code), forKey: hashKey)
+    }
+
+    public static func clear() {
+        UserDefaults.standard.removeObject(forKey: hashKey)
+    }
+
+    public static var action: Action {
+        get {
+            return Action(rawValue: UserDefaults.standard.integer(forKey: actionKey)) ?? .logout
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: actionKey)
+        }
+    }
+
+    public static func matches(_ code: String) -> Bool {
+        guard let stored = UserDefaults.standard.string(forKey: hashKey), !code.isEmpty else {
+            return false
+        }
+        return stored == hash(code)
+    }
+
+    /// Marks every account as logged out. managedCleanupAccounts then logs each one out on the
+    /// server and deletes its data; with .deleteAccounts it deletes the account first
+    /// (edit "duress-delete").
+    public static func trigger(accountManager: AccountManager<TelegramAccountManagerTypes>) {
+        let deleteAccounts = action == .deleteAccounts
+        IlvDeletedMessages.clearMarks()
+        IlvGhost.resetPeerOverrides()
+        let _ = (accountManager.transaction { transaction -> [AccountRecordId] in
+            return transaction.getRecords().map { $0.id }
+        }
+        |> mapToSignal { ids -> Signal<Void, NoError> in
+            if deleteAccounts {
+                UserDefaults.standard.set(ids.map { NSNumber(value: $0.int64) }, forKey: pendingDeletionKey)
+            }
+            return combineLatest(ids.map { logoutFromAccount(id: $0, accountManager: accountManager, alreadyLoggedOutRemotely: false) })
+            |> map { _ in Void() }
+        }).start()
+    }
+
+    /// Whether this account must be deleted (not only logged out); forgets the mark.
+    static func takePendingDeletion(_ id: AccountRecordId) -> Bool {
+        var pending = (UserDefaults.standard.array(forKey: pendingDeletionKey) as? [NSNumber]) ?? []
+        guard let index = pending.firstIndex(where: { $0.int64Value == id.int64 }) else {
+            return false
+        }
+        pending.remove(at: index)
+        UserDefaults.standard.set(pending, forKey: pendingDeletionKey)
+        return true
+    }
+}
+
+/// Runs before auth.logOut while an account is being cleaned up.
+func ilvDuressBeforeLogout(id: AccountRecordId, network: Network) -> Signal<Void, NoError> {
+    if !IlvDuress.takePendingDeletion(id) {
+        return .single(Void())
+    }
+    return network.request(Api.functions.account.deleteAccount(flags: 0, reason: "", password: nil))
+    |> map { _ in Void() }
+    |> `catch` { _ -> Signal<Void, NoError> in
+        return .single(Void())
+    }
+    |> take(1)
+}
+
+// MARK: - Appearance and tab bar
+
+public enum IlvAppearance {
+    /// Read directly (same key) by ChatMessageBackground, which does not link TelegramCore.
+    private static let bubbleAlphaKey = "ilvtg.bubbleAlpha"
+
+    public static let bubbleAlphaPresets: [Double] = [1.0, 0.85, 0.7, 0.5, 0.3]
+
+    /// Opacity of message bubbles, 1.0 = opaque.
+    public static var bubbleAlpha: Double {
+        get {
+            let value = UserDefaults.standard.double(forKey: bubbleAlphaKey)
+            return value > 0.0 ? min(1.0, value) : 1.0
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: bubbleAlphaKey)
+        }
+    }
+}
+
+public enum IlvTabs {
+    /// Same keys are read directly by TabBarComponent, which does not link TelegramCore.
+    private static let hideContactsKey = "ilvtg.tabs.hideContacts"
+    private static let hideTitlesKey = "ilvtg.tabs.hideTitles"
+    private static let versionPromise = ValuePromise<Int>(0, ignoreRepeated: false)
+    private static let versionCounter = Atomic<Int>(value: 0)
+
+    public static var hideContacts: Bool {
+        get {
+            return UserDefaults.standard.bool(forKey: hideContactsKey)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: hideContactsKey)
+            notify()
+        }
+    }
+
+    public static var hideTitles: Bool {
+        get {
+            return UserDefaults.standard.bool(forKey: hideTitlesKey)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: hideTitlesKey)
+            notify()
+        }
+    }
+
+    private static func notify() {
+        versionPromise.set(versionCounter.modify { $0 + 1 })
+    }
+
+    /// Fires after the first change, then on every change.
+    public static var changed: Signal<Void, NoError> {
+        return versionPromise.get() |> filter { $0 > 0 } |> map { _ in Void() }
+    }
 }

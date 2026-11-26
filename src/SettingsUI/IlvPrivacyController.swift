@@ -1,5 +1,5 @@
-// ilvtg — settings screen. Shown as its own tab in the root tab bar and also reachable from
-// Settings → Privacy and Security → first row.
+// ilvtg — settings screen. Settings → "ilvtg" (own row in the main list) and Settings → Privacy
+// and Security → first row.
 // Copied into submodules/SettingsUI/Sources/Ilv/ by ci/prepare.py.
 
 import Foundation
@@ -13,6 +13,7 @@ import PresentationDataUtils
 import AccountContext
 import OverlayStatusController
 import UndoUI
+import TelegramUIPreferences
 
 public struct IlvStrings {
     public let ru: Bool
@@ -73,6 +74,61 @@ public struct IlvStrings {
         )
     }
 
+    var appearanceHeader: String { return t("ОФОРМЛЕНИЕ", "APPEARANCE") }
+    var appearanceFooter: String {
+        return t(
+            "Вишнёвый цвет заменяет стандартный синий во встроенных темах; изменение применяется после перезапуска приложения. Прозрачность применяется к пузырям сообщений после повторного открытия чата.",
+            "Cherry replaces the default blue in the built-in themes; takes effect after restarting the app. Transparency applies to message bubbles after reopening a chat."
+        )
+    }
+    var bubbleAlphaHeader: String { return t("ПРОЗРАЧНОСТЬ СООБЩЕНИЙ", "MESSAGE TRANSPARENCY") }
+    func bubbleAlpha(_ value: Double) -> String {
+        if value >= 0.999 {
+            return t("Без прозрачности", "Opaque")
+        }
+        return t("Непрозрачность \(Int((value * 100.0).rounded()))%", "Opacity \(Int((value * 100.0).rounded()))%")
+    }
+    var streamerFooter: String {
+        return t(
+            "Режим стримера скрывает номера телефонов, юзернеймы и ID в профилях — нажмите на скрытое значение, чтобы показать его. Номер и юзернейм в шапке настроек скрыты, пока режим включён.",
+            "Streamer mode hides phone numbers, usernames and IDs in profiles — tap a hidden value to reveal it. The number and username at the top of Settings stay hidden while the mode is on."
+        )
+    }
+    var tabsHeader: String { return t("ПАНЕЛЬ ВКЛАДОК", "TAB BAR") }
+    var showContactsTab: String { return t("Вкладка «Контакты»", "Contacts tab") }
+    var showCallsTab: String { return t("Вкладка «Звонки»", "Calls tab") }
+    var showTabTitles: String { return t("Подписи вкладок", "Tab titles") }
+    var locationHeader: String { return t("ЭМУЛЯЦИЯ ГЕОПОЗИЦИИ", "LOCATION EMULATION") }
+    func locationOn(_ latitude: Double, _ longitude: Double) -> String {
+        return t("Включена: ", "On: ") + String(format: "%.5f, %.5f", latitude, longitude)
+    }
+    var locationOff: String { return t("Выключена", "Off") }
+    var locationDisable: String { return t("Выключить эмуляцию", "Turn off emulation") }
+    var locationFooter: String {
+        return t(
+            "Чтобы включить: откройте в любом чате вложения → «Геопозиция», передвиньте карту так, чтобы метка стояла в нужном месте, и нажмите «Эмулировать геопозицию здесь». Приложение будет сообщать эту точку вместо настоящей — при отправке текущей и трансляции геопозиции.",
+            "To turn on: in any chat open attachments → Location, move the map so the pin is where you want and tap \"Emulate location here\". The app then reports that point instead of your real location — when sending your current or live location."
+        )
+    }
+    var duressHeader: String { return t("ФЕЙК-ПАРОЛЬ", "FAKE PASSCODE") }
+    var duressSet: String { return t("Задать фейк-пароль…", "Set fake passcode…") }
+    var duressChange: String { return t("Изменить фейк-пароль…", "Change fake passcode…") }
+    var duressClear: String { return t("Удалить фейк-пароль", "Remove fake passcode") }
+    var duressLogout: String { return t("Выйти из аккаунтов и стереть данные", "Log out and erase data") }
+    var duressDelete: String { return t("Удалить аккаунты навсегда", "Delete accounts permanently") }
+    var duressFooter: String {
+        return t(
+            "Работает, если включён код-пароль приложения (Конфиденциальность → Код-пароль). Если на экране блокировки ввести фейк-пароль вместо настоящего, приложение откроется уже без аккаунтов: все аккаунты будут завершены на сервере, а данные на устройстве стёрты. В режиме «Удалить навсегда» аккаунты Telegram удаляются безвозвратно вместе со всеми чатами и контактами — восстановить их будет невозможно (для аккаунтов с облачным паролем Telegram может отложить удаление). Фейк-пароль должен отличаться от настоящего.",
+            "Works when the app passcode is on (Privacy → Passcode). Entering the fake passcode on the lock screen instead of the real one opens the app with no accounts: every account is logged out on the server and local data is erased. With \"Delete permanently\" the Telegram accounts are deleted for good with all chats and contacts — they cannot be restored (Telegram may delay deletion for accounts with a cloud password). The fake passcode must differ from the real one."
+        )
+    }
+    var duressPromptTitle: String { return t("Фейк-пароль", "Fake passcode") }
+    var duressPromptText: String { return t("Введите фейк-пароль дважды. Он должен отличаться от настоящего код-пароля.", "Enter the fake passcode twice. It must differ from your real passcode.") }
+    var duressMismatch: String { return t("Пароли не совпадают.", "The passcodes don't match.") }
+    var duressSaved: String { return t("Фейк-пароль сохранён.", "Fake passcode saved.") }
+    var save: String { return t("Сохранить", "Save") }
+    var cancel: String { return t("Отмена", "Cancel") }
+
     public func label(_ option: IlvPrivacyOption) -> String {
         switch option {
         case .hideReadReceipts:
@@ -95,6 +151,12 @@ public struct IlvStrings {
             return t("Одноразовые — без ограничений", "Unlimited view-once replays")
         case .blurFacesInVideoMessages:
             return t("Замазывать лица в кружках", "Blur faces in video messages")
+        case .streamerMode:
+            return t("Режим стримера", "Streamer mode")
+        case .showPeerId:
+            return t("Показывать ID в профиле", "Show ID in profiles")
+        case .cherryAccent:
+            return t("Вишнёвый цвет интерфейса", "Cherry accent color")
         }
     }
 
@@ -172,21 +234,31 @@ public func ilvGhostImage(color: UIColor, size: CGFloat, crossed: Bool) -> UIIma
     }
 }
 
+/// Icon of the "ilvtg" row in the main Settings list.
+public let ilvSettingsIcon: UIImage = {
+    let size = CGSize(width: 30.0, height: 30.0)
+    return UIGraphicsImageRenderer(size: size).image { _ in
+        let rect = CGRect(origin: .zero, size: size)
+        UIColor(red: 0.69, green: 0.07, blue: 0.23, alpha: 1.0).setFill()
+        UIBezierPath(roundedRect: rect, cornerRadius: 8.0).fill()
+        let ghost = ilvGhostImage(color: .white, size: 22.0, crossed: false)
+        ghost.draw(in: CGRect(x: 4.0, y: 4.0, width: 22.0, height: 22.0))
+    }
+}()
+
 private final class IlvPrivacyControllerArguments {
     let toggle: (IlvPrivacyOption, Bool) -> Void
     let setGhostMode: (Bool) -> Void
-    let setVoicePreset: (IlvVoicePreset) -> Void
-    let resetChats: () -> Void
-    let clearDeletedMarks: () -> Void
-    let exportChat: () -> Void
+    let setFlag: (IlvFlag, Bool) -> Void
+    let choose: (IlvChoice) -> Void
+    let perform: (IlvPrivacyAction) -> Void
 
-    init(toggle: @escaping (IlvPrivacyOption, Bool) -> Void, setGhostMode: @escaping (Bool) -> Void, setVoicePreset: @escaping (IlvVoicePreset) -> Void, resetChats: @escaping () -> Void, clearDeletedMarks: @escaping () -> Void, exportChat: @escaping () -> Void) {
+    init(toggle: @escaping (IlvPrivacyOption, Bool) -> Void, setGhostMode: @escaping (Bool) -> Void, setFlag: @escaping (IlvFlag, Bool) -> Void, choose: @escaping (IlvChoice) -> Void, perform: @escaping (IlvPrivacyAction) -> Void) {
         self.toggle = toggle
         self.setGhostMode = setGhostMode
-        self.setVoicePreset = setVoicePreset
-        self.resetChats = resetChats
-        self.clearDeletedMarks = clearDeletedMarks
-        self.exportChat = exportChat
+        self.setFlag = setFlag
+        self.choose = choose
+        self.perform = perform
     }
 }
 
@@ -195,6 +267,11 @@ private enum IlvPrivacySection: Int32 {
     case messages
     case voice
     case media
+    case appearance
+    case bubbleAlpha
+    case tabs
+    case location
+    case duress
     case tools
     case network
 }
@@ -203,13 +280,41 @@ private enum IlvPrivacyAction: Equatable {
     case resetChats
     case clearDeletedMarks
     case exportChat
+    case disableLocation
+    case setDuress
+    case clearDuress
+
+    var isDestructive: Bool {
+        switch self {
+        case .resetChats, .clearDeletedMarks, .clearDuress:
+            return true
+        case .exportChat, .disableLocation, .setDuress:
+            return false
+        }
+    }
+}
+
+/// Switches that are not IlvPrivacyOption values.
+private enum IlvFlag: Equatable {
+    case showContactsTab
+    case showCallsTab
+    case showTabTitles
+}
+
+/// One-of-many rows.
+private enum IlvChoice: Equatable {
+    case voice(IlvVoicePreset)
+    case bubbleAlpha(Double)
+    case duressAction(IlvDuress.Action)
 }
 
 private enum IlvPrivacyEntry: ItemListNodeEntry {
     case header(Int32, IlvPrivacySection, String)
     case ghostMaster(Int32, String, Bool)
     case toggle(Int32, IlvPrivacySection, IlvPrivacyOption, String, Bool)
-    case voice(Int32, IlvVoicePreset, String, Bool)
+    case flag(Int32, IlvPrivacySection, IlvFlag, String, Bool)
+    case choice(Int32, IlvPrivacySection, IlvChoice, String, Bool)
+    case info(Int32, IlvPrivacySection, String)
     case action(Int32, IlvPrivacySection, IlvPrivacyAction, String)
     case footer(Int32, IlvPrivacySection, String)
 
@@ -221,8 +326,12 @@ private enum IlvPrivacyEntry: ItemListNodeEntry {
             return IlvPrivacySection.ghost.rawValue
         case let .toggle(_, section, _, _, _):
             return section.rawValue
-        case .voice:
-            return IlvPrivacySection.voice.rawValue
+        case let .flag(_, section, _, _, _):
+            return section.rawValue
+        case let .choice(_, section, _, _, _):
+            return section.rawValue
+        case let .info(_, section, _):
+            return section.rawValue
         case let .action(_, section, _, _):
             return section.rawValue
         case let .footer(_, section, _):
@@ -238,7 +347,11 @@ private enum IlvPrivacyEntry: ItemListNodeEntry {
             return id
         case let .toggle(id, _, _, _, _):
             return id
-        case let .voice(id, _, _, _):
+        case let .flag(id, _, _, _, _):
+            return id
+        case let .choice(id, _, _, _, _):
+            return id
+        case let .info(id, _, _):
             return id
         case let .action(id, _, _, _):
             return id
@@ -267,8 +380,20 @@ private enum IlvPrivacyEntry: ItemListNodeEntry {
             } else {
                 return false
             }
-        case let .voice(lhsId, lhsPreset, lhsText, lhsValue):
-            if case let .voice(rhsId, rhsPreset, rhsText, rhsValue) = rhs, lhsId == rhsId, lhsPreset == rhsPreset, lhsText == rhsText, lhsValue == rhsValue {
+        case let .flag(lhsId, lhsSection, lhsFlag, lhsText, lhsValue):
+            if case let .flag(rhsId, rhsSection, rhsFlag, rhsText, rhsValue) = rhs, lhsId == rhsId, lhsSection == rhsSection, lhsFlag == rhsFlag, lhsText == rhsText, lhsValue == rhsValue {
+                return true
+            } else {
+                return false
+            }
+        case let .choice(lhsId, lhsSection, lhsChoice, lhsText, lhsValue):
+            if case let .choice(rhsId, rhsSection, rhsChoice, rhsText, rhsValue) = rhs, lhsId == rhsId, lhsSection == rhsSection, lhsChoice == rhsChoice, lhsText == rhsText, lhsValue == rhsValue {
+                return true
+            } else {
+                return false
+            }
+        case let .info(lhsId, lhsSection, lhsText):
+            if case let .info(rhsId, rhsSection, rhsText) = rhs, lhsId == rhsId, lhsSection == rhsSection, lhsText == rhsText {
                 return true
             } else {
                 return false
@@ -305,20 +430,19 @@ private enum IlvPrivacyEntry: ItemListNodeEntry {
             return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: text, value: value, sectionId: self.section, style: .blocks, updated: { updatedValue in
                 arguments.toggle(option, updatedValue)
             })
-        case let .voice(_, preset, text, value):
-            return ItemListCheckboxItem(presentationData: presentationData, systemStyle: .glass, title: text, style: .left, checked: value, zeroSeparatorInsets: false, sectionId: self.section, action: {
-                arguments.setVoicePreset(preset)
+        case let .flag(_, _, flag, text, value):
+            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: text, value: value, sectionId: self.section, style: .blocks, updated: { updatedValue in
+                arguments.setFlag(flag, updatedValue)
             })
+        case let .choice(_, _, choice, text, value):
+            return ItemListCheckboxItem(presentationData: presentationData, systemStyle: .glass, title: text, style: .left, checked: value, zeroSeparatorInsets: false, sectionId: self.section, action: {
+                arguments.choose(choice)
+            })
+        case let .info(_, _, text):
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: text, label: "", sectionId: self.section, style: .blocks, disclosureStyle: .none, action: nil)
         case let .action(_, _, action, text):
-            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: text, kind: action == .exportChat ? .generic : .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: {
-                switch action {
-                case .resetChats:
-                    arguments.resetChats()
-                case .clearDeletedMarks:
-                    arguments.clearDeletedMarks()
-                case .exportChat:
-                    arguments.exportChat()
-                }
+            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: text, kind: action.isDestructive ? .destructive : .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: {
+                arguments.perform(action)
             })
         case let .footer(_, _, text):
             return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
@@ -331,13 +455,21 @@ private struct IlvPrivacyState: Equatable {
     var voicePreset: IlvVoicePreset
     var overriddenChats: Int
     var deletedMarks: Int
+    var bubbleAlpha: Double
+    var hideContactsTab: Bool
+    var hideTabTitles: Bool
+    var emulatedLatitude: Double?
+    var emulatedLongitude: Double?
+    var duressSet: Bool
+    var duressAction: IlvDuress.Action
 
     static func current() -> IlvPrivacyState {
         var values: [IlvPrivacyOption: Bool] = [:]
         for option in IlvPrivacyOption.allCases {
             values[option] = IlvPrivacy.isEnabled(option)
         }
-        return IlvPrivacyState(values: values, voicePreset: IlvVoicePreset.current, overriddenChats: IlvGhost.overriddenChatCount, deletedMarks: IlvDeletedMessages.count)
+        let coordinate = IlvLocationEmulation.coordinate
+        return IlvPrivacyState(values: values, voicePreset: IlvVoicePreset.current, overriddenChats: IlvGhost.overriddenChatCount, deletedMarks: IlvDeletedMessages.count, bubbleAlpha: IlvAppearance.bubbleAlpha, hideContactsTab: IlvTabs.hideContacts, hideTabTitles: IlvTabs.hideTitles, emulatedLatitude: coordinate?.0, emulatedLongitude: coordinate?.1, duressSet: IlvDuress.isSet, duressAction: IlvDuress.action)
     }
 
     func value(_ option: IlvPrivacyOption) -> Bool {
@@ -345,7 +477,7 @@ private struct IlvPrivacyState: Equatable {
     }
 }
 
-private func ilvPrivacyEntries(state: IlvPrivacyState) -> [IlvPrivacyEntry] {
+private func ilvPrivacyEntries(state: IlvPrivacyState, showCallsTab: Bool) -> [IlvPrivacyEntry] {
     let strings = IlvStrings()
     var entries: [IlvPrivacyEntry] = []
 
@@ -373,7 +505,7 @@ private func ilvPrivacyEntries(state: IlvPrivacyState) -> [IlvPrivacyEntry] {
     entries.append(.header(40, .voice, strings.voiceHeader))
     id = 41
     for preset in IlvVoicePreset.allCases {
-        entries.append(.voice(id, preset, strings.label(preset), state.voicePreset == preset))
+        entries.append(.choice(id, .voice, .voice(preset), strings.label(preset), state.voicePreset == preset))
         id += 1
     }
 
@@ -381,13 +513,49 @@ private func ilvPrivacyEntries(state: IlvPrivacyState) -> [IlvPrivacyEntry] {
     entries.append(.toggle(61, .media, .blurFacesInVideoMessages, strings.label(.blurFacesInVideoMessages), state.value(.blurFacesInVideoMessages)))
     entries.append(.footer(79, .media, strings.mediaFooter))
 
-    entries.append(.header(80, .tools, strings.toolsHeader))
-    entries.append(.action(81, .tools, .exportChat, strings.exportChat))
-    entries.append(.footer(99, .tools, strings.exportFooter))
+    entries.append(.header(200, .appearance, strings.appearanceHeader))
+    entries.append(.toggle(201, .appearance, .cherryAccent, strings.label(.cherryAccent), state.value(.cherryAccent)))
+    entries.append(.toggle(202, .appearance, .streamerMode, strings.label(.streamerMode), state.value(.streamerMode)))
+    entries.append(.toggle(203, .appearance, .showPeerId, strings.label(.showPeerId), state.value(.showPeerId)))
+    entries.append(.footer(219, .appearance, strings.appearanceFooter + "\n\n" + strings.streamerFooter))
 
-    entries.append(.header(100, .network, strings.networkHeader))
-    entries.append(.toggle(101, .network, .blockSponsored, strings.label(.blockSponsored), state.value(.blockSponsored)))
-    entries.append(.footer(150, .network, strings.networkFooter))
+    entries.append(.header(220, .bubbleAlpha, strings.bubbleAlphaHeader))
+    id = 221
+    for value in IlvAppearance.bubbleAlphaPresets {
+        entries.append(.choice(id, .bubbleAlpha, .bubbleAlpha(value), strings.bubbleAlpha(value), abs(state.bubbleAlpha - value) < 0.001))
+        id += 1
+    }
+
+    entries.append(.header(240, .tabs, strings.tabsHeader))
+    entries.append(.flag(241, .tabs, .showContactsTab, strings.showContactsTab, !state.hideContactsTab))
+    entries.append(.flag(242, .tabs, .showCallsTab, strings.showCallsTab, showCallsTab))
+    entries.append(.flag(243, .tabs, .showTabTitles, strings.showTabTitles, !state.hideTabTitles))
+
+    entries.append(.header(260, .location, strings.locationHeader))
+    if let latitude = state.emulatedLatitude, let longitude = state.emulatedLongitude {
+        entries.append(.info(261, .location, strings.locationOn(latitude, longitude)))
+        entries.append(.action(262, .location, .disableLocation, strings.locationDisable))
+    } else {
+        entries.append(.info(261, .location, strings.locationOff))
+    }
+    entries.append(.footer(279, .location, strings.locationFooter))
+
+    entries.append(.header(280, .duress, strings.duressHeader))
+    entries.append(.action(281, .duress, .setDuress, state.duressSet ? strings.duressChange : strings.duressSet))
+    if state.duressSet {
+        entries.append(.action(282, .duress, .clearDuress, strings.duressClear))
+    }
+    entries.append(.choice(283, .duress, .duressAction(.logout), strings.duressLogout, state.duressAction == .logout))
+    entries.append(.choice(284, .duress, .duressAction(.deleteAccounts), strings.duressDelete, state.duressAction == .deleteAccounts))
+    entries.append(.footer(299, .duress, strings.duressFooter))
+
+    entries.append(.header(300, .tools, strings.toolsHeader))
+    entries.append(.action(301, .tools, .exportChat, strings.exportChat))
+    entries.append(.footer(319, .tools, strings.exportFooter))
+
+    entries.append(.header(320, .network, strings.networkHeader))
+    entries.append(.toggle(321, .network, .blockSponsored, strings.label(.blockSponsored), state.value(.blockSponsored)))
+    entries.append(.footer(350, .network, strings.networkFooter))
 
     return entries
 }
@@ -423,7 +591,39 @@ private func ilvStartChatExport(context: AccountContext, peerId: EnginePeer.Id, 
     }))
 }
 
-private func ilvSettingsController(context: AccountContext, isTab: Bool) -> ViewController {
+/// Asks for the fake passcode twice in a native alert.
+private func ilvPresentDuressPrompt(context: AccountContext, completion: @escaping (Bool) -> Void) {
+    let strings = IlvStrings()
+    let alert = UIAlertController(title: strings.duressPromptTitle, message: strings.duressPromptText, preferredStyle: .alert)
+    for _ in 0 ..< 2 {
+        alert.addTextField(configurationHandler: { textField in
+            textField.isSecureTextEntry = true
+            textField.keyboardType = .asciiCapable
+            textField.autocorrectionType = .no
+            textField.autocapitalizationType = .none
+        })
+    }
+    alert.addAction(UIAlertAction(title: strings.cancel, style: .cancel, handler: { _ in
+        completion(false)
+    }))
+    alert.addAction(UIAlertAction(title: strings.save, style: .default, handler: { [weak alert] _ in
+        let first = alert?.textFields?.first?.text ?? ""
+        let second = alert?.textFields?.last?.text ?? ""
+        if first.isEmpty || first != second {
+            completion(false)
+            let presentationData = context.sharedContext.currentPresentationData.with { $0 }
+            context.sharedContext.mainWindow?.present(UndoOverlayController(presentationData: presentationData, content: .info(title: nil, text: strings.duressMismatch, timeout: nil, customUndoText: nil), elevatedLayout: false, action: { _ in
+                return false
+            }), on: .root, blockInteraction: false, completion: {})
+            return
+        }
+        IlvDuress.set(code: first)
+        completion(true)
+    }))
+    context.sharedContext.applicationBindings.presentNativeController(alert)
+}
+
+private func ilvSettingsController(context: AccountContext) -> ViewController {
     let strings = IlvStrings()
     let statePromise = ValuePromise(IlvPrivacyState.current(), ignoreRepeated: true)
     let refresh = {
@@ -432,6 +632,14 @@ private func ilvSettingsController(context: AccountContext, isTab: Bool) -> View
 
     var pushControllerImpl: ((ViewController) -> Void)?
     var exportImpl: ((EnginePeer.Id) -> Void)?
+    var showToastImpl: ((String) -> Void)?
+
+    let accountManager = context.sharedContext.accountManager
+    let showCallsTab: Signal<Bool, NoError> = accountManager.sharedData(keys: [ApplicationSpecificSharedDataKeys.callListSettings])
+    |> map { sharedData -> Bool in
+        return (sharedData.entries[ApplicationSpecificSharedDataKeys.callListSettings]?.get(CallListSettings.self) ?? CallListSettings.defaultSettings).showTab
+    }
+    |> distinctUntilChanged
 
     let arguments = IlvPrivacyControllerArguments(toggle: { option, value in
         IlvPrivacy.setEnabled(option, value)
@@ -439,43 +647,70 @@ private func ilvSettingsController(context: AccountContext, isTab: Bool) -> View
     }, setGhostMode: { value in
         IlvPrivacy.setGhostModeEnabled(value)
         refresh()
-    }, setVoicePreset: { preset in
-        IlvVoicePreset.current = preset
-        refresh()
-    }, resetChats: {
-        IlvGhost.resetPeerOverrides()
-        refresh()
-    }, clearDeletedMarks: {
-        IlvDeletedMessages.clearMarks()
-        refresh()
-    }, exportChat: {
-        let selection = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.doNotSearchMessages], hasContactSelector: false, title: strings.exportTitle))
-        selection.peerSelected = { [weak selection] peer, _ in
-            selection?.dismiss()
-            exportImpl?(peer.id)
+    }, setFlag: { flag, value in
+        switch flag {
+        case .showContactsTab:
+            IlvTabs.hideContacts = !value
+        case .showTabTitles:
+            IlvTabs.hideTitles = !value
+        case .showCallsTab:
+            let _ = updateCallListSettingsInteractively(accountManager: accountManager, { settings in
+                return settings.withUpdatedShowTab(value)
+            }).start()
         }
-        pushControllerImpl?(selection)
+        refresh()
+    }, choose: { choice in
+        switch choice {
+        case let .voice(preset):
+            IlvVoicePreset.current = preset
+        case let .bubbleAlpha(value):
+            IlvAppearance.bubbleAlpha = value
+        case let .duressAction(action):
+            IlvDuress.action = action
+        }
+        refresh()
+    }, perform: { action in
+        switch action {
+        case .resetChats:
+            IlvGhost.resetPeerOverrides()
+            refresh()
+        case .clearDeletedMarks:
+            IlvDeletedMessages.clearMarks()
+            refresh()
+        case .exportChat:
+            let selection = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.doNotSearchMessages], hasContactSelector: false, title: strings.exportTitle))
+            selection.peerSelected = { [weak selection] peer, _ in
+                selection?.dismiss()
+                exportImpl?(peer.id)
+            }
+            pushControllerImpl?(selection)
+        case .disableLocation:
+            IlvLocationEmulation.disable()
+            refresh()
+        case .setDuress:
+            ilvPresentDuressPrompt(context: context, completion: { saved in
+                refresh()
+                if saved {
+                    showToastImpl?(strings.duressSaved)
+                }
+            })
+        case .clearDuress:
+            IlvDuress.clear()
+            refresh()
+        }
     })
 
-    let signal = combineLatest(context.sharedContext.presentationData, statePromise.get())
+    let signal = combineLatest(context.sharedContext.presentationData, statePromise.get(), showCallsTab)
     |> deliverOnMainQueue
-    |> map { presentationData, state -> (ItemListControllerState, (ItemListNodeState, Any)) in
-        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(strings.title), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: isTab ? nil : ItemListBackButton(title: presentationData.strings.Common_Back))
-        let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: ilvPrivacyEntries(state: state), style: .blocks, animateChanges: false)
+    |> map { presentationData, state, showCallsTab -> (ItemListControllerState, (ItemListNodeState, Any)) in
+        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(strings.title), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
+        let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: ilvPrivacyEntries(state: state, showCallsTab: showCallsTab), style: .blocks, animateChanges: false)
         return (controllerState, (listState, arguments))
     }
 
-    let tabBarItem: Signal<ItemListControllerTabBarItem, NoError>?
-    if isTab {
-        let icon = ilvGhostImage(color: .black, size: 28.0, crossed: false).withRenderingMode(.alwaysTemplate)
-        tabBarItem = .single(ItemListControllerTabBarItem(title: strings.title, image: icon, selectedImage: icon))
-    } else {
-        tabBarItem = nil
-    }
-
-    let controller = ItemListController(context: context, state: signal, tabBarItem: tabBarItem)
+    let controller = ItemListController(context: context, state: signal)
     controller.didAppear = { _ in
-        // Per-chat ghost switches and deleted marks change outside this screen.
+        // Per-chat ghost switches, deleted marks and location emulation change outside this screen.
         refresh()
     }
     pushControllerImpl = { [weak controller] c in
@@ -491,15 +726,16 @@ private func ilvSettingsController(context: AccountContext, isTab: Bool) -> View
     exportImpl = { [weak controller] peerId in
         ilvStartChatExport(context: context, peerId: peerId, controller: controller)
     }
+    showToastImpl = { [weak controller] text in
+        let presentationData = context.sharedContext.currentPresentationData.with { $0 }
+        controller?.present(UndoOverlayController(presentationData: presentationData, content: .info(title: nil, text: text, timeout: nil, customUndoText: nil), elevatedLayout: false, action: { _ in
+            return false
+        }), in: .current)
+    }
     return controller
 }
 
-/// Settings → Privacy and Security → "ilvtg Privacy".
+/// Settings → "ilvtg", and Settings → Privacy and Security → "ilvtg Privacy".
 public func ilvPrivacyController(context: AccountContext) -> ViewController {
-    return ilvSettingsController(context: context, isTab: false)
-}
-
-/// The "ilvtg" tab in the root tab bar.
-public func ilvSettingsTabController(context: AccountContext) -> ViewController {
-    return ilvSettingsController(context: context, isTab: true)
+    return ilvSettingsController(context: context)
 }

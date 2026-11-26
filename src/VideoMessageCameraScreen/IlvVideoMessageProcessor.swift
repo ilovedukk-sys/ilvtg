@@ -19,15 +19,31 @@ var ilvVideoMessageProcessingEnabled: Bool {
 private final class IlvFaceTracker {
     private var lastFaces: [CGRect] = []
     private var framesSinceDetection = 0
-    private let request = VNDetectFaceRectanglesRequest()
+    private var frameIndex = 0
 
-    /// Normalized face rectangles (Vision coordinates, origin bottom-left). The last result is
-    /// kept for a few frames so a single missed detection does not uncover a face.
+    /// Normalized face rectangles (Vision coordinates, origin bottom-left). Detection runs on
+    /// every second frame, and the last result is kept for a few frames so a single missed
+    /// detection does not uncover a face.
     func faces(in image: CIImage) -> [CGRect] {
+        self.frameIndex += 1
+        if self.frameIndex % 2 == 0 && !self.lastFaces.isEmpty {
+            return self.lastFaces
+        }
+        let extent = image.extent
+        if extent.isInfinite || extent.isEmpty || extent.width < 16.0 || extent.height < 16.0 {
+            return self.lastFaces
+        }
+        // A fresh request per frame: Vision requests are not meant to be reused across handlers.
+        let request = VNDetectFaceRectanglesRequest()
         let handler = VNImageRequestHandler(ciImage: image, options: [:])
         var detected: [CGRect] = []
-        if (try? handler.perform([self.request])) != nil, let results = self.request.results {
-            detected = results.map { $0.boundingBox }
+        do {
+            try handler.perform([request])
+            detected = (request.results ?? []).map { $0.boundingBox }.filter { rect in
+                return rect.width.isFinite && rect.height.isFinite && rect.width > 0.0 && rect.height > 0.0
+            }
+        } catch {
+            detected = []
         }
         if detected.isEmpty {
             self.framesSinceDetection += 1
@@ -183,10 +199,13 @@ private func ilvProcessVideoFile(input: URL, output: URL, blurFaces: Bool, pitch
             writer.cancelWriting()
             throw IlvVideoProcessingError.failed
         }
-        var progressed = false
+        // Each frame allocates autoreleased Core Image and Vision objects; without a pool per
+        // iteration a long recording runs the app out of memory.
+        let progressed = autoreleasepool { () -> Bool in
+        var didProgress = false
 
         if !videoDone && videoInput.isReadyForMoreMediaData {
-            progressed = true
+            didProgress = true
             if let sampleBuffer = videoOutput.copyNextSampleBuffer() {
                 let time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
                 if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
@@ -198,7 +217,7 @@ private func ilvProcessVideoFile(input: URL, output: URL, blurFaces: Bool, pitch
                             let upright = source.oriented(orientation)
                             let faces = faceTracker.faces(in: upright)
                             let processed = ilvBlurFaces(upright, faces: faces).oriented(inverseOrientation)
-                            ciContext.render(processed, to: outputBuffer)
+                            ciContext.render(processed, to: outputBuffer, bounds: CGRect(x: 0.0, y: 0.0, width: CGFloat(CVPixelBufferGetWidth(outputBuffer)), height: CGFloat(CVPixelBufferGetHeight(outputBuffer))), colorSpace: CGColorSpaceCreateDeviceRGB())
                             if !adaptor.append(outputBuffer, withPresentationTime: time) {
                                 videoDone = true
                                 videoInput.markAsFinished()
@@ -216,7 +235,7 @@ private func ilvProcessVideoFile(input: URL, output: URL, blurFaces: Bool, pitch
         }
 
         if !audioDone, let audioOutput = audioOutput, let audioInput = audioInput, audioInput.isReadyForMoreMediaData {
-            progressed = true
+            didProgress = true
             if let sampleBuffer = audioOutput.copyNextSampleBuffer() {
                 if !voiceChangers.isEmpty, let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) {
                     var length = 0
@@ -238,6 +257,9 @@ private func ilvProcessVideoFile(input: URL, output: URL, blurFaces: Bool, pitch
                 audioDone = true
                 audioInput.markAsFinished()
             }
+        }
+
+        return didProgress
         }
 
         if !progressed {
@@ -288,12 +310,7 @@ private func ilvProcessedThumbnail(_ image: UIImage, blurFaces: Bool) -> UIImage
         return image
     }
     let source = CIImage(cgImage: cgImage)
-    let request = VNDetectFaceRectanglesRequest()
-    let handler = VNImageRequestHandler(ciImage: source, options: [:])
-    var faces: [CGRect] = []
-    if (try? handler.perform([request])) != nil, let results = request.results {
-        faces = results.map { $0.boundingBox }
-    }
+    let faces = IlvFaceTracker().faces(in: source)
     // Without a detected face, the thumbnail (also used as the preview) is pixelated as a whole.
     let processed = faces.isEmpty ? ilvBlurFaces(source, faces: [CGRect(x: 0.0, y: 0.0, width: 1.0, height: 1.0)]) : ilvBlurFaces(source, faces: faces)
     let context = CIContext(options: nil)

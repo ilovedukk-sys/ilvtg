@@ -67,6 +67,21 @@ class Tree:
             shutil.copy2(src, dst)
         self.applied.append(name)
 
+    def replace_region(self, name: str, relpath: str, start: str, end: str, new: str):
+        """Replaces the text from `start` (inclusive) up to `end` (exclusive); both anchors must
+        occur exactly once."""
+        text = self._read(relpath)
+        for anchor in (start, end):
+            found = text.count(anchor)
+            if found != 1:
+                raise SystemExit(f"[ilvtg] edit '{name}': expected 1 match of an anchor in {relpath}, found {found}")
+        begin = text.index(start)
+        finish = text.index(end)
+        if finish < begin:
+            raise SystemExit(f"[ilvtg] edit '{name}': anchors out of order in {relpath}")
+        self._write(relpath, text[:begin] + new + text[finish:])
+        self.applied.append(name)
+
     def append(self, name: str, relpath: str, text: str):
         current = self._read(relpath)
         if not current.endswith("\n"):
@@ -100,6 +115,7 @@ def privacy_layer(t: Tree):
            "                subscriber.putError(MTRpcError(errorCode: 400, errorDescription: \"ILVTG_PRIVACY_BLOCKED\"))\n"
            "                return EmptyDisposable\n"
            "            }\n"
+           "            ilvNoteRequest(data.0.name, network: self)\n"
            "            let request = NetworkEngineRequest(\n",
            count=2)
 
@@ -244,26 +260,39 @@ def chat_ui(t: Tree):
            "        return ilvButton\n"
            "    }\n")
 
-    # The ilvtg settings tab, between Chats and Settings.
+    # Tab bar settings: Contacts tab can be hidden; changes apply at once.
+    t.copy("tabs-refresh-source", ROOT / "src/TelegramUI/IlvRootTabs.swift",
+           "submodules/TelegramUI/Sources/Ilv/IlvRootTabs.swift")
     f = "submodules/TelegramUI/Sources/TelegramRootController.swift"
-    t.edit("tab-property", f,
+    t.edit("tabs-property", f,
            "    public var accountSettingsController: PeerInfoScreen?\n",
            "    public var accountSettingsController: PeerInfoScreen?\n"
-           "    private var ilvTabController: ViewController?\n")
-    t.edit("tab-add", f,
+           "    private var ilvTabsDisposable: Disposable?\n")
+    t.edit("tabs-contacts-add", f,
+           "        controllers.append(contactsController)\n",
+           "        if !IlvTabs.hideContacts {\n"
+           "            controllers.append(contactsController)\n"
+           "        }\n")
+    t.edit("tabs-observe", f,
            "        accountSettingsController.parentController = self\n"
            "        controllers.append(accountSettingsController)\n",
            "        accountSettingsController.parentController = self\n"
-           "        let ilvTab = ilvSettingsTabController(context: self.context)\n"
-           "        self.ilvTabController = ilvTab\n"
-           "        controllers.append(ilvTab)\n"
-           "        controllers.append(accountSettingsController)\n")
-    t.edit("tab-update", f,
-           "        controllers.append(self.accountSettingsController!)\n",
-           "        if let ilvTab = self.ilvTabController {\n"
-           "            controllers.append(ilvTab)\n"
+           "        if self.ilvTabsDisposable == nil {\n"
+           "            self.ilvTabsDisposable = (IlvTabs.changed\n"
+           "            |> deliverOnMainQueue).start(next: { [weak self] _ in\n"
+           "                self?.ilvRefreshTabs()\n"
+           "            })\n"
            "        }\n"
-           "        controllers.append(self.accountSettingsController!)\n")
+           "        controllers.append(accountSettingsController)\n")
+    t.edit("tabs-contacts-update", f,
+           "        controllers.append(self.contactsController!)\n",
+           "        if !IlvTabs.hideContacts {\n"
+           "            controllers.append(self.contactsController!)\n"
+           "        }\n")
+    t.edit("tabs-titles", "submodules/TelegramUI/Components/TabBarComponent/Sources/TabBarComponent.swift",
+           "                        showsTitle: !component.isCompact,\n",
+           "                        showsTitle: !component.isCompact && !UserDefaults.standard.bool(forKey: \"ilvtg.tabs.hideTitles\"),\n",
+           count=2)
 
 
 def privacy_defaults(t: Tree):
@@ -350,6 +379,242 @@ def settings_screen(t: Tree):
            "    pushControllerImpl = { [weak controller] c, animated in\n")
 
 
+def settings_row(t: Tree):
+    # "ilvtg" row in the main Settings list (first row of the notifications/privacy group).
+    d = "submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/"
+    t.edit("settings-row", d + "PeerInfoSettingsItems.swift",
+           "    items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 0, label: notificationsWarning",
+           "    items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 100, text: \"ilvtg\", icon: ilvSettingsRowIcon, action: {\n"
+           "        interaction.openSettings(.ilvtg)\n"
+           "    }))\n"
+           "    items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 0, label: notificationsWarning")
+    t.edit("settings-row-section", d + "PeerInfoScreen.swift",
+           "    case ton\n    case wallet\n}\n",
+           "    case ton\n    case wallet\n    case ilvtg\n}\n")
+    t.edit("settings-row-open", d + "PeerInfoScreenSettingsActions.swift",
+           "        case .wallet:\n            guard WalletConfiguration",
+           "        case .ilvtg:\n"
+           "            push(ilvPrivacyController(context: self.context))\n"
+           "        case .wallet:\n            guard WalletConfiguration")
+
+
+def profile(t: Tree):
+    d = "submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/"
+    t.copy("profile-source", ROOT / "src/PeerInfoScreen/IlvProfile.swift", d + "IlvProfile.swift")
+    f = d + "PeerInfoProfileItems.swift"
+
+    # ID row at the end of the main section.
+    t.edit("profile-id", f,
+           "    var result: [(AnyHashable, [PeerInfoScreenItem])] = []\n"
+           "    for section in InfoSection.allCases {\n",
+           "    if let ilvIdItem = ilvPeerIdItem(data: data, presentationData: presentationData, interaction: interaction) {\n"
+           "        items[.peerInfo]!.append(ilvIdItem)\n"
+           "    }\n"
+           "    var result: [(AnyHashable, [PeerInfoScreenItem])] = []\n"
+           "    for section in InfoSection.allCases {\n")
+
+    # Streamer mode: phone numbers and usernames are dots until tapped.
+    t.edit("streamer-phone", f,
+           "PeerInfoScreenLabeledValueItem(id: ItemPhoneNumber, label: label, text: formattedPhone, textColor: .accent, action: { node, progress in\n"
+           "                interaction.openPhone(phone, node, nil, progress)\n",
+           "PeerInfoScreenLabeledValueItem(id: ItemPhoneNumber, label: label, text: IlvStreamer.text(formattedPhone), textColor: .accent, action: { node, progress in\n"
+           "                if IlvStreamer.reveal(formattedPhone, interaction: interaction) {\n"
+           "                    return\n"
+           "                }\n"
+           "                interaction.openPhone(phone, node, nil, progress)\n")
+    t.edit("streamer-username", f,
+           "                    label: presentationData.strings.Profile_Username,\n"
+           "                    text: \"@\\(mainUsername)\",\n"
+           "                    additionalText: additionalUsernames,\n"
+           "                    textColor: .accent,\n"
+           "                    icon: .qrCode,\n"
+           "                    action: { _, progress in\n"
+           "                        interaction.openUsername(mainUsername, true, progress)\n",
+           "                    label: presentationData.strings.Profile_Username,\n"
+           "                    text: IlvStreamer.text(\"@\\(mainUsername)\"),\n"
+           "                    additionalText: IlvStreamer.optionalText(additionalUsernames),\n"
+           "                    textColor: .accent,\n"
+           "                    icon: .qrCode,\n"
+           "                    action: { _, progress in\n"
+           "                        if IlvStreamer.reveal(\"@\\(mainUsername)\", interaction: interaction) {\n"
+           "                            return\n"
+           "                        }\n"
+           "                        interaction.openUsername(mainUsername, true, progress)\n")
+    t.edit("streamer-header", d + "PeerInfoHeaderNode.swift",
+           "                    subtitle = \"\\(subtitle) • @\\(mainUsername)\"\n"
+           "                }\n"
+           "                subtitleStringText = subtitle\n",
+           "                    subtitle = \"\\(subtitle) • @\\(mainUsername)\"\n"
+           "                }\n"
+           "                subtitleStringText = IlvStreamer.text(subtitle)\n")
+
+
+def location_emulation(t: Tree):
+    # Every location the app takes from the device (live location, "current location").
+    f = "submodules/DeviceLocationManager/Sources/DeviceLocationManager.swift"
+    t.edit("location-push", f,
+           "        if let currentLocation = self.currentLocation {\n"
+           "            updated(currentLocation, self.currentHeading?.magneticHeading)\n",
+           "        if let currentLocation = ilvEmulatedLocation(self.currentLocation) {\n"
+           "            updated(currentLocation, self.currentHeading?.magneticHeading)\n")
+    t.edit("location-updates", f,
+           "        if let location = locations.first {\n",
+           "        if let location = ilvEmulatedLocation(locations.first) {\n")
+    t.append("location-helper", f,
+             "\n"
+             "/// ilvtg: location emulation. TelegramCore's IlvLocationEmulation writes these keys.\n"
+             "func ilvEmulatedLocation(_ location: CLLocation?) -> CLLocation? {\n"
+             "    let defaults = UserDefaults.standard\n"
+             "    guard defaults.bool(forKey: \"ilvtg.location.enabled\") else {\n"
+             "        return location\n"
+             "    }\n"
+             "    let coordinate = CLLocationCoordinate2D(latitude: defaults.double(forKey: \"ilvtg.location.lat\"), longitude: defaults.double(forKey: \"ilvtg.location.lon\"))\n"
+             "    return CLLocation(coordinate: coordinate, altitude: location?.altitude ?? 0.0, horizontalAccuracy: 10.0, verticalAccuracy: -1.0, timestamp: Date())\n"
+             "}\n")
+
+    # The location picker: an "Emulate location here" row under "Send my current location".
+    d = "submodules/LocationUI/Sources/"
+    t.copy("location-picker-source", ROOT / "src/LocationUI/IlvLocation.swift", d + "IlvLocation.swift")
+    t.edit("location-interaction", d + "LocationPickerController.swift",
+           "    let showPlacesInThisArea: () -> Void\n",
+           "    let showPlacesInThisArea: () -> Void\n"
+           "    var ilvToggleEmulation: () -> Void = {}\n")
+    f = d + "LocationPickerControllerNode.swift"
+    t.edit("location-entry-id", f,
+           "    case liveLocation\n    case header\n",
+           "    case liveLocation\n    case ilvEmulation\n    case header\n")
+    t.edit("location-entry", f,
+           "    case liveLocation(PresentationTheme, String, String, CLLocationCoordinate2D?)\n",
+           "    case liveLocation(PresentationTheme, String, String, CLLocationCoordinate2D?)\n"
+           "    case ilvEmulation(PresentationTheme, String, String)\n")
+    t.edit("location-entry-stable-id", f,
+           "        case .liveLocation:\n            return .liveLocation\n",
+           "        case .liveLocation:\n            return .liveLocation\n"
+           "        case .ilvEmulation:\n            return .ilvEmulation\n")
+    t.edit("location-entry-equal", f,
+           "            case let .header(lhsTheme, lhsTitle):\n",
+           "            case let .ilvEmulation(lhsTheme, lhsTitle, lhsSubtitle):\n"
+           "                if case let .ilvEmulation(rhsTheme, rhsTitle, rhsSubtitle) = rhs, lhsTheme === rhsTheme, lhsTitle == rhsTitle, lhsSubtitle == rhsSubtitle {\n"
+           "                    return true\n"
+           "                } else {\n"
+           "                    return false\n"
+           "                }\n"
+           "            case let .header(lhsTheme, lhsTitle):\n")
+    t.replace_region("location-entry-order", f,
+                     "    static func <(lhs: LocationPickerEntry, rhs: LocationPickerEntry) -> Bool {\n",
+                     "    func item(engine: TelegramEngine, presentationData: PresentationData, interaction: LocationPickerInteraction?) -> ListViewItem {\n",
+                     "    static func <(lhs: LocationPickerEntry, rhs: LocationPickerEntry) -> Bool {\n"
+                     "        let lhsRank = lhs.ilvRank\n"
+                     "        let rhsRank = rhs.ilvRank\n"
+                     "        if lhsRank != rhsRank {\n"
+                     "            return lhsRank < rhsRank\n"
+                     "        }\n"
+                     "        if case let .venue(_, _, _, _, lhsIndex) = lhs, case let .venue(_, _, _, _, rhsIndex) = rhs {\n"
+                     "            return lhsIndex < rhsIndex\n"
+                     "        }\n"
+                     "        return false\n"
+                     "    }\n"
+                     "\n"
+                     "    private var ilvRank: Int {\n"
+                     "        switch self {\n"
+                     "        case .city:\n"
+                     "            return 0\n"
+                     "        case .location:\n"
+                     "            return 1\n"
+                     "        case .liveLocation:\n"
+                     "            return 2\n"
+                     "        case .ilvEmulation:\n"
+                     "            return 3\n"
+                     "        case .header:\n"
+                     "            return 4\n"
+                     "        case .venue:\n"
+                     "            return 5\n"
+                     "        case .attribution:\n"
+                     "            return 6\n"
+                     "        }\n"
+                     "    }\n"
+                     "    \n")
+    t.edit("location-entry-item", f,
+           "            case let .header(_, title):\n"
+           "                return LocationSectionHeaderItem(",
+           "            case let .ilvEmulation(_, title, subtitle):\n"
+           "                return LocationActionListItem(presentationData: ItemListPresentationData(presentationData), engine: engine, title: title, subtitle: subtitle, icon: .location, beginTimeAndTimeout: nil, action: {\n"
+           "                    interaction?.ilvToggleEmulation()\n"
+           "                })\n"
+           "            case let .header(_, title):\n"
+           "                return LocationSectionHeaderItem(")
+    t.edit("location-user-location", f,
+           "        let userLocation: Signal<CLLocation?, NoError> = self.headerNode.mapNode.userLocation\n",
+           "        interaction.ilvToggleEmulation = { [weak self] in\n"
+           "            ilvToggleLocationEmulation(coordinate: self?.headerNode.mapNode.mapCenterCoordinate)\n"
+           "        }\n"
+           "        let userLocation: Signal<CLLocation?, NoError> = ilvEmulatedUserLocation(self.headerNode.mapNode.userLocation)\n")
+    t.edit("location-entry-add", f,
+           "                entries.append(.header(presentationData.theme, presentationData.strings.Map_ChooseAPlace.uppercased()))\n",
+           "                if case .share = mode, source == .generic {\n"
+           "                    entries.append(.ilvEmulation(presentationData.theme, ilvLocationEmulationTitle(), ilvLocationEmulationSubtitle()))\n"
+           "                }\n"
+           "                entries.append(.header(presentationData.theme, presentationData.strings.Map_ChooseAPlace.uppercased()))\n")
+
+
+def appearance(t: Tree):
+    # Cherry accent for the built-in themes.
+    t.copy("cherry-accent-source", ROOT / "src/TelegramPresentationData/IlvAccent.swift",
+           "submodules/TelegramPresentationData/Sources/IlvAccent.swift")
+    t.edit("cherry-accent", "submodules/TelegramPresentationData/Sources/MakePresentationTheme.swift",
+           "            theme = customizePresentationTheme(defaultTheme, editing: true, accentColor: accentColor, outgoingAccentColor: outgoingAccentColor, backgroundColors: backgroundColors, bubbleColors: bubbleColors, animateBubbleColors: animateBubbleColors, wallpaper: wallpaper, baseColor: baseColor)\n",
+           "            theme = customizePresentationTheme(defaultTheme, editing: true, accentColor: ilvAccentColor(accentColor, reference: reference), outgoingAccentColor: outgoingAccentColor, backgroundColors: backgroundColors, bubbleColors: bubbleColors, animateBubbleColors: animateBubbleColors, wallpaper: wallpaper, baseColor: baseColor)\n")
+
+    # Message bubble transparency.
+    f = "submodules/ChatMessageBackground/Sources/ChatMessageBackground.swift"
+    t.edit("bubble-alpha-outline", f,
+           "        self.addSubnode(self.outlineImageNode)\n",
+           "        self.addSubnode(self.outlineImageNode)\n"
+           "        self.outlineImageNode.alpha = CGFloat(ilvBubbleAlpha())\n")
+    t.edit("bubble-alpha-image", f,
+           "        imageView.image = self.imageViewImage\n",
+           "        imageView.image = self.imageViewImage\n"
+           "        imageView.alpha = CGFloat(ilvBubbleAlpha())\n")
+    t.edit("bubble-alpha-backdrop", f,
+           "                        self.insertSubnode(backgroundContent, at: 0)\n",
+           "                        backgroundContent.alpha = CGFloat(ilvBubbleAlpha())\n"
+           "                        self.insertSubnode(backgroundContent, at: 0)\n",
+           count=2)
+    t.append("bubble-alpha-helper", f,
+             "\n"
+             "/// ilvtg: opacity of message bubbles. TelegramCore's IlvAppearance writes this key.\n"
+             "func ilvBubbleAlpha() -> Double {\n"
+             "    let value = UserDefaults.standard.double(forKey: \"ilvtg.bubbleAlpha\")\n"
+             "    return value > 0.0 ? min(1.0, value) : 1.0\n"
+             "}\n")
+
+
+def fake_passcode(t: Tree):
+    # A wrong passcode that matches the fake one wipes the accounts and opens the (now empty) app.
+    t.edit("fake-passcode", "submodules/PasscodeUI/Sources/PasscodeEntryController.swift",
+           "                    case .invalidCode:\n"
+           "                        self.controllerNode.animateError()\n",
+           "                    case .invalidCode:\n"
+           "                        if IlvDuress.matches(code) {\n"
+           "                            IlvDuress.trigger(accountManager: self.accountManager)\n"
+           "                            if self.authenticated == nil && self.completed == nil {\n"
+           "                                self.appLockContext.unlock()\n"
+           "                                return\n"
+           "                            }\n"
+           "                        }\n"
+           "                        self.controllerNode.animateError()\n")
+    # "Delete accounts permanently": account.deleteAccount right before the server logout.
+    t.edit("duress-delete", "submodules/TelegramCore/Sources/Account/AccountManager.swift",
+           "                account.shouldBeServiceTaskMaster.set(.single(.always))\n"
+           "                return account.network.request(Api.functions.auth.logOut())\n",
+           "                account.shouldBeServiceTaskMaster.set(.single(.always))\n"
+           "                return (ilvDuressBeforeLogout(id: id, network: account.network)\n"
+           "                |> castError(MTRpcError.self)\n"
+           "                |> mapToSignal { _ -> Signal<Api.auth.LoggedOut, MTRpcError> in\n"
+           "                    return account.network.request(Api.functions.auth.logOut())\n"
+           "                })\n")
+
+
 def sideload_compat(t: Tree):
     # Sideloading tools re-sign the app, often without the App Group entitlement. Upstream then
     # stops launching before the window is shown ("Error 2" on a hidden window = black screen).
@@ -433,6 +698,11 @@ def main():
     media_privacy(t)
     privacy_defaults(t)
     settings_screen(t)
+    settings_row(t)
+    profile(t)
+    location_emulation(t)
+    appearance(t)
+    fake_passcode(t)
     chat_ui(t)
     sideload_compat(t)
     branding(t, app)
