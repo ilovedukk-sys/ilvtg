@@ -12,10 +12,10 @@ on:
   workflow_dispatch:
     inputs:
       configuration:
-        description: release_arm64 = optimized IPA; debug_arm64 = faster compile, much larger IPA
+        description: release_arm64 = optimized IPA; debug_arm64 = faster compile, much larger IPA; release_sim_arm64 = iOS Simulator build (.app) for cloud simulators
         type: choice
         default: release_arm64
-        options: [release_arm64, debug_arm64]
+        options: [release_arm64, debug_arm64, release_sim_arm64]
       refresh_rate:
         description: Screen refresh rate on ProMotion iPhones (60 Hz uses less battery)
         type: choice
@@ -26,7 +26,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ios-${{ github.ref }}
+  group: ios-${{ github.ref }}-${{ inputs.configuration || 'release_arm64' }}
   cancel-in-progress: true
 
 env:
@@ -116,6 +116,7 @@ jobs:
           name: ilvtg-ios-${{ env.CONFIGURATION }}-${{ github.run_number }}
           path: |
             ${{ runner.temp }}/out/*.ipa
+            ${{ runner.temp }}/out/*.app.zip
             ${{ runner.temp }}/out/manifest.json
           if-no-files-found: error
           retention-days: 7
