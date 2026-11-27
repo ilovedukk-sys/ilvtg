@@ -7,6 +7,7 @@ a build that silently lacks a privacy change.
 """
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -788,6 +789,70 @@ def extras(t: Tree):
            "        if let sectionItems = items[section], !sectionItems.isEmpty {\n")
 
 
+def stories_and_locks(t: Tree, app: dict):
+    msgs = "submodules/TelegramCore/Sources/TelegramEngine/Messages/TelegramEngineMessages.swift"
+    # Hidden stories: no stories bar and no preloading.
+    t.edit("hide-stories", msgs,
+           "        public func storySubscriptions(isHidden: Bool, tempKeepNewlyArchived: Bool = false) -> Signal<EngineStorySubscriptions, NoError> {\n",
+           "        public func storySubscriptions(isHidden: Bool, tempKeepNewlyArchived: Bool = false) -> Signal<EngineStorySubscriptions, NoError> {\n"
+           "            if IlvPrivacy.isEnabled(.hideStories) {\n"
+           "                return .single(EngineStorySubscriptions(accountItem: nil, items: [], hasMoreToken: nil))\n"
+           "            }\n")
+    t.edit("hide-stories-preload", msgs,
+           "        public func preloadStorySubscriptions(isHidden: Bool, preferHighQuality: Signal<Bool, NoError>) -> Signal<[EngineMedia.Id: StoryPreloadInfo], NoError> {\n",
+           "        public func preloadStorySubscriptions(isHidden: Bool, preferHighQuality: Signal<Bool, NoError>) -> Signal<[EngineMedia.Id: StoryPreloadInfo], NoError> {\n"
+           "            if IlvPrivacy.isEnabled(.hideStories) {\n"
+           "                return .single([:])\n"
+           "            }\n")
+
+    # "Save to Gallery" for anyone's story, without Premium.
+    f = "submodules/TelegramUI/Components/Stories/StoryContainerScreen/Sources/StoryItemSetContainerComponent.swift"
+    t.edit("download-stories-menu", f,
+           "                    } else if !component.slice.item.storyItem.isForwardingDisabled {\n",
+           "                    } else if !component.slice.item.storyItem.isForwardingDisabled || IlvPrivacy.isEnabled(.downloadStories) {\n")
+    t.edit("download-stories-icon", f,
+           "UIImage(bundleImageName: accountUser.isPremium ? \"Chat/Context Menu/Download\" : \"Chat/Context Menu/DownloadLocked\")",
+           "UIImage(bundleImageName: (accountUser.isPremium || IlvPrivacy.isEnabled(.downloadStories)) ? \"Chat/Context Menu/Download\" : \"Chat/Context Menu/DownloadLocked\")")
+    t.edit("download-stories-save", f,
+           "                            if accountUser.isPremium {\n"
+           "                                self.requestSave()\n",
+           "                            if accountUser.isPremium || IlvPrivacy.isEnabled(.downloadStories) {\n"
+           "                                self.requestSave()\n")
+
+    # Locked chats: Face ID / Touch ID / passcode before opening; empty long-press preview.
+    t.copy("chat-lock-source", ROOT / "src/TelegramUI/IlvChatLockGate.swift",
+           "submodules/TelegramUI/Sources/Ilv/IlvChatLockGate.swift")
+    t.edit("chat-lock-open", "submodules/TelegramUI/Sources/NavigateToChatController.swift",
+           "public func navigateToChatControllerImpl(_ params: NavigateToChatControllerParams) {\n",
+           "public func navigateToChatControllerImpl(_ params: NavigateToChatControllerParams) {\n"
+           "    if case let .peer(peer) = params.chatLocation, ilvChatNeedsUnlock(peer.id) {\n"
+           "        ilvUnlockChat(peer.id, completion: {\n"
+           "            ilvNavigateToChatControllerAfterUnlock(params)\n"
+           "        })\n"
+           "        return\n"
+           "    }\n"
+           "    ilvNavigateToChatControllerAfterUnlock(params)\n"
+           "}\n"
+           "\n"
+           "private func ilvNavigateToChatControllerAfterUnlock(_ params: NavigateToChatControllerParams) {\n")
+    t.edit("chat-lock-preview", "submodules/TelegramUI/Sources/ChatController.swift",
+           "    override public func loadDisplayNode() {\n"
+           "        self.loadDisplayNodeImpl()\n",
+           "    override public func loadDisplayNode() {\n"
+           "        self.loadDisplayNodeImpl()\n"
+           "        if case .standard(.previewing) = self.presentationInterfaceState.mode, case let .peer(peerId) = self.chatLocation, ilvChatNeedsUnlock(peerId) {\n"
+           "            self.displayNode.isHidden = true\n"
+           "        }\n")
+
+    # 120 Hz on ProMotion iPhones unless app.json turns it off (60 Hz saves battery).
+    # The workflow's "refresh_rate" input (ILVTG_REFRESH_RATE=60) overrides app.json.
+    high_refresh_rate = app.get("high_refresh_rate", True) and os.environ.get("ILVTG_REFRESH_RATE", "120") != "60"
+    if not high_refresh_rate:
+        t.edit("refresh-rate-60hz", "Telegram/BUILD",
+               "    <key>CADisableMinimumFrameDurationOnPhone</key>\n    <true/>\n",
+               "    <key>CADisableMinimumFrameDurationOnPhone</key>\n    <false/>\n")
+
+
 def sideload_compat(t: Tree):
     # Sideloading tools re-sign the app, often without the App Group entitlement. Upstream then
     # stops launching before the window is shown ("Error 2" on a hidden window = black screen).
@@ -879,6 +944,7 @@ def main():
     ayu_features(t)
     battery(t)
     extras(t)
+    stories_and_locks(t, app)
     chat_ui(t)
     sideload_compat(t)
     branding(t, app)

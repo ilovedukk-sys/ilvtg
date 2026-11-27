@@ -16,6 +16,11 @@ on:
         type: choice
         default: release_arm64
         options: [release_arm64, debug_arm64]
+      refresh_rate:
+        description: Screen refresh rate on ProMotion iPhones (60 Hz uses less battery)
+        type: choice
+        default: "120"
+        options: ["120", "60"]
 
 permissions:
   contents: read
@@ -27,6 +32,7 @@ concurrency:
 env:
   PYTHONUNBUFFERED: "1"
   CONFIGURATION: ${{ inputs.configuration || 'release_arm64' }}
+  ILVTG_REFRESH_RATE: ${{ inputs.refresh_rate || '120' }}
 
 jobs:
   # Cheap and fast: proves every ilvtg edit still applies to the pinned upstream commit.

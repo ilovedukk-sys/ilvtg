@@ -55,12 +55,16 @@ public enum IlvPrivacyOption: String, CaseIterable {
     case confirmCalls
     /// Premium, Stars and gift rows are hidden in Settings.
     case hidePremiumPromos
+    /// The stories bar is hidden and stories are not preloaded.
+    case hideStories
+    /// "Save to Gallery" for anyone's stories, without Premium.
+    case downloadStories
 
     public var defaultValue: Bool {
         switch self {
-        case .blockSponsored, .showChatGhostButton, .keepDeletedMessages, .keepSelfDestructing, .replayViewOnce, .showPeerId, .cherryAccent, .ghostSending, .ignoreCopyProtection, .hideScreenshots, .keepEditHistory, .confirmCalls:
+        case .blockSponsored, .showChatGhostButton, .keepDeletedMessages, .keepSelfDestructing, .replayViewOnce, .showPeerId, .cherryAccent, .ghostSending, .ignoreCopyProtection, .hideScreenshots, .keepEditHistory, .confirmCalls, .downloadStories:
             return true
-        case .hideReadReceipts, .hideStoryViews, .hideOnlineStatus, .hideTyping, .blurFacesInVideoMessages, .streamerMode, .hidePremiumPromos:
+        case .hideReadReceipts, .hideStoryViews, .hideOnlineStatus, .hideTyping, .blurFacesInVideoMessages, .streamerMode, .hidePremiumPromos, .hideStories:
             return false
         }
     }
@@ -561,5 +565,29 @@ public enum IlvTabs {
     /// Fires after the first change, then on every change.
     public static var changed: Signal<Void, NoError> {
         return versionPromise.get() |> filter { $0 > 0 } |> map { _ in Void() }
+    }
+}
+
+// MARK: - Locked chats
+
+/// Chats that open only after Face ID / Touch ID / the device passcode. The check itself is in
+/// TelegramUI (IlvChatLockGate).
+public enum IlvChatLock {
+    private static let key = "ilvtg.lockedChats"
+
+    public static var lockedPeerIds: [Int64] {
+        return (UserDefaults.standard.array(forKey: key) as? [NSNumber])?.map { $0.int64Value } ?? []
+    }
+
+    public static func isLocked(_ peerId: PeerId) -> Bool {
+        return lockedPeerIds.contains(peerId.toInt64())
+    }
+
+    public static func setLocked(_ peerId: PeerId, _ value: Bool) {
+        var ids = lockedPeerIds.filter { $0 != peerId.toInt64() }
+        if value {
+            ids.append(peerId.toInt64())
+        }
+        UserDefaults.standard.set(ids.map { NSNumber(value: $0) }, forKey: key)
     }
 }

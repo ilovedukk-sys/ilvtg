@@ -1,5 +1,5 @@
-// ilvtg — extra items in the message context menu: the edit history of a message and, while
-// ghost mode is on for the chat, reading the chat on demand.
+// ilvtg — extra items in the message context menu: the edit history of a message, reading the
+// chat on demand while ghost mode is on for it, and saving a voice message as an M4A file.
 // Copied into submodules/TelegramUI/Sources/Ilv/ by ci/prepare.py and added to the menu by the
 // edit "message-context-actions".
 
@@ -16,6 +16,7 @@ import UndoUI
 import AppBundle
 import ChatControllerInteraction
 import SettingsUI
+import ConvertOpusToAAC
 
 private func ilvEditHistoryText(message: EngineRawMessage, versions: [IlvEditVersion], strings: IlvStrings) -> String {
     let formatter = DateFormatter()
@@ -64,5 +65,49 @@ func ilvMessageContextActions(context: AccountContext, message: EngineRawMessage
         })))
     }
 
+    if let file = message.media.first(where: { $0 is TelegramMediaFile }) as? TelegramMediaFile, file.isVoice {
+        items.append(.action(ContextMenuActionItem(text: strings.t("Сохранить как M4A", "Save as M4A"), icon: { theme in
+            return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Download"), color: theme.actionSheet.primaryTextColor)
+        }, action: { _, f in
+            f(.default)
+            ilvExportVoiceMessage(context: context, message: message, file: file, controllerInteraction: controllerInteraction)
+        })))
+    }
+
     return items
+}
+
+/// Downloads the voice message if needed, converts it from Opus to AAC and opens the share sheet
+/// with an .m4a file.
+private func ilvExportVoiceMessage(context: AccountContext, message: EngineRawMessage, file: TelegramMediaFile, controllerInteraction: ChatControllerInteraction) {
+    let strings = IlvStrings()
+    let fetch = fetchedMediaResource(mediaBox: context.account.postbox.mediaBox, userLocation: .peer(message.id.peerId), userContentType: .other, reference: .media(media: .message(message: MessageReference(message), media: file), resource: file.resource))
+    let signal: Signal<String?, NoError> = context.engine.resources.data(id: EngineMediaResource.Id(file.resource.id))
+    |> filter { $0.isComplete }
+    |> take(1)
+    |> mapToSignal { data -> Signal<String?, NoError> in
+        return convertOpusToAAC(sourcePath: data.path, allocateTempFile: {
+            return EngineTempBox.shared.tempFile(fileName: "audio.m4a").path
+        })
+    }
+    let fetchDisposable = fetch.start()
+    let _ = (signal
+    |> timeout(60.0, queue: Queue.mainQueue(), alternate: .single(nil))
+    |> deliverOnMainQueue).startStandalone(next: { path in
+        fetchDisposable.dispose()
+        guard let path = path else {
+            controllerInteraction.displayUndo(.info(title: nil, text: strings.t("Не удалось сохранить голосовое", "Couldn't save the voice message"), timeout: nil, customUndoText: nil))
+            return
+        }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        let name = strings.t("Голосовое", "Voice") + " " + formatter.string(from: Date(timeIntervalSince1970: TimeInterval(message.timestamp))) + ".m4a"
+        let target = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(name)
+        try? FileManager.default.removeItem(at: target)
+        guard (try? FileManager.default.copyItem(at: URL(fileURLWithPath: path), to: target)) != nil else {
+            return
+        }
+        let activityController = UIActivityViewController(activityItems: [target], applicationActivities: nil)
+        context.sharedContext.applicationBindings.presentNativeController(activityController)
+    })
 }

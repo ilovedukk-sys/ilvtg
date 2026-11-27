@@ -132,6 +132,22 @@ public struct IlvStrings {
             "ilvtg defaults: videos in chats don't autoplay, stickers and emoji play once, the app doesn't keep working in the background longer than needed and downloads nothing in the background, auto-download is \"medium\" on Wi-Fi (no large video preloading) and \"low\" on cellular, and power saving turns on by itself at 30% battery. If the app was already installed, tap \"Apply battery-saving settings\" to bring your settings in line. Fine-tune the rest in Telegram's power saving."
         )
     }
+    var storiesHeader: String { return t("ИСТОРИИ", "STORIES") }
+    var storiesFooter: String {
+        return t(
+            "«Скрыть истории» убирает полосу историй над чатами и не даёт приложению заранее загружать их — это ещё и экономит батарею и трафик. «Скачивание историй» добавляет «Сохранить в галерею» в меню любой истории, без Premium.",
+            "\"Hide stories\" removes the stories bar above the chats and stops the app from preloading them, which also saves battery and data. \"Download stories\" adds \"Save to Gallery\" to the menu of any story, without Premium."
+        )
+    }
+    var lockedChatsHeader: String { return t("ЗАБЛОКИРОВАННЫЕ ЧАТЫ", "LOCKED CHATS") }
+    var lockChat: String { return t("Заблокировать чат…", "Lock a chat…") }
+    var unlockLabel: String { return t("Снять", "Remove") }
+    var lockedChatsFooter: String {
+        return t(
+            "Заблокированный чат открывается только после Face ID, Touch ID или код-пароля телефона, а предпросмотр по долгому нажатию остаётся пустым. После разблокировки чат открывается без проверки 5 минут. Нажмите на чат в списке, чтобы снять блокировку.",
+            "A locked chat opens only after Face ID, Touch ID or the device passcode, and its long-press preview stays empty. Once unlocked, it opens without a check for 5 minutes. Tap a chat in the list to remove the lock."
+        )
+    }
     var callsFooter: String {
         return t(
             "Перед каждым исходящим звонком приложение спросит подтверждение — случайное нажатие на трубку никого не разбудит.",
@@ -233,6 +249,10 @@ public struct IlvStrings {
             return t("Подтверждать звонки", "Confirm calls")
         case .hidePremiumPromos:
             return t("Скрыть Premium и звёзды", "Hide Premium and Stars")
+        case .hideStories:
+            return t("Скрыть истории", "Hide stories")
+        case .downloadStories:
+            return t("Скачивание историй", "Download stories")
         }
     }
 
@@ -330,8 +350,9 @@ private final class IlvPrivacyControllerArguments {
     let perform: (IlvPrivacyAction) -> Void
     let openPage: (IlvPage) -> Void
     let openURL: (String) -> Void
+    let unlockChat: (Int64) -> Void
 
-    init(toggle: @escaping (IlvPrivacyOption, Bool) -> Void, setGhostMode: @escaping (Bool) -> Void, setFlag: @escaping (IlvFlag, Bool) -> Void, choose: @escaping (IlvChoice) -> Void, perform: @escaping (IlvPrivacyAction) -> Void, openPage: @escaping (IlvPage) -> Void, openURL: @escaping (String) -> Void) {
+    init(toggle: @escaping (IlvPrivacyOption, Bool) -> Void, setGhostMode: @escaping (Bool) -> Void, setFlag: @escaping (IlvFlag, Bool) -> Void, choose: @escaping (IlvChoice) -> Void, perform: @escaping (IlvPrivacyAction) -> Void, openPage: @escaping (IlvPage) -> Void, openURL: @escaping (String) -> Void, unlockChat: @escaping (Int64) -> Void) {
         self.toggle = toggle
         self.setGhostMode = setGhostMode
         self.setFlag = setFlag
@@ -339,6 +360,7 @@ private final class IlvPrivacyControllerArguments {
         self.perform = perform
         self.openPage = openPage
         self.openURL = openURL
+        self.unlockChat = unlockChat
     }
 }
 
@@ -445,6 +467,8 @@ private enum IlvPrivacySection: Int32 {
     case network
     case battery
     case calls
+    case stories
+    case lockedChats
 }
 
 private enum IlvPrivacyAction: Equatable {
@@ -457,12 +481,13 @@ private enum IlvPrivacyAction: Equatable {
     case clearEditHistory
     case applyBatterySaving
     case openEnergySettings
+    case lockChat
 
     var isDestructive: Bool {
         switch self {
         case .resetChats, .clearDeletedMarks, .clearDuress, .clearEditHistory:
             return true
-        case .exportChat, .disableLocation, .setDuress, .applyBatterySaving, .openEnergySettings:
+        case .exportChat, .disableLocation, .setDuress, .applyBatterySaving, .openEnergySettings, .lockChat:
             return false
         }
     }
@@ -486,6 +511,7 @@ private enum IlvPrivacyEntry: ItemListNodeEntry {
     case hero(Int32, String, String)
     case category(Int32, IlvPage, String, String)
     case link(Int32, String, String, String)
+    case lockedChat(Int32, Int64, String)
     case header(Int32, IlvPrivacySection, String)
     case ghostMaster(Int32, String, Bool)
     case toggle(Int32, IlvPrivacySection, IlvPrivacyOption, String, Bool)
@@ -503,6 +529,8 @@ private enum IlvPrivacyEntry: ItemListNodeEntry {
             return IlvPrivacySection.categories.rawValue
         case .link:
             return IlvPrivacySection.links.rawValue
+        case .lockedChat:
+            return IlvPrivacySection.lockedChats.rawValue
         case let .header(_, section, _):
             return section.rawValue
         case .ghostMaster:
@@ -529,6 +557,8 @@ private enum IlvPrivacyEntry: ItemListNodeEntry {
         case let .category(id, _, _, _):
             return id
         case let .link(id, _, _, _):
+            return id
+        case let .lockedChat(id, _, _):
             return id
         case let .header(id, _, _):
             return id
@@ -559,6 +589,12 @@ private enum IlvPrivacyEntry: ItemListNodeEntry {
             }
         case let .category(lhsId, lhsPage, lhsTitle, lhsLabel):
             if case let .category(rhsId, rhsPage, rhsTitle, rhsLabel) = rhs, lhsId == rhsId, lhsPage == rhsPage, lhsTitle == rhsTitle, lhsLabel == rhsLabel {
+                return true
+            } else {
+                return false
+            }
+        case let .lockedChat(lhsId, lhsPeerId, lhsTitle):
+            if case let .lockedChat(rhsId, rhsPeerId, rhsTitle) = rhs, lhsId == rhsId, lhsPeerId == rhsPeerId, lhsTitle == rhsTitle {
                 return true
             } else {
                 return false
@@ -637,6 +673,10 @@ private enum IlvPrivacyEntry: ItemListNodeEntry {
             return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: ilvLinkIcon(color: presentationData.theme.list.itemPrimaryTextColor), title: title, label: value, labelStyle: .coloredText(presentationData.theme.list.itemAccentColor), sectionId: self.section, style: .blocks, disclosureStyle: .none, action: {
                 arguments.openURL(url)
             })
+        case let .lockedChat(_, peerId, title):
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: title, label: IlvStrings().unlockLabel, labelStyle: .coloredText(presentationData.theme.list.itemDestructiveColor), sectionId: self.section, style: .blocks, disclosureStyle: .none, action: {
+                arguments.unlockChat(peerId)
+            })
         case let .header(_, _, text):
             return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
         case let .ghostMaster(_, text, value):
@@ -680,6 +720,7 @@ private struct IlvPrivacyState: Equatable {
     var emulatedLongitude: Double?
     var duressSet: Bool
     var duressAction: IlvDuress.Action
+    var lockedChatIds: [Int64]
 
     static func current() -> IlvPrivacyState {
         var values: [IlvPrivacyOption: Bool] = [:]
@@ -687,7 +728,7 @@ private struct IlvPrivacyState: Equatable {
             values[option] = IlvPrivacy.isEnabled(option)
         }
         let coordinate = IlvLocationEmulation.coordinate
-        return IlvPrivacyState(values: values, voicePreset: IlvVoicePreset.current, overriddenChats: IlvGhost.overriddenChatCount, deletedMarks: IlvDeletedMessages.count, editHistoryCount: IlvEditHistory.count, bubbleAlpha: IlvAppearance.bubbleAlpha, hideContactsTab: IlvTabs.hideContacts, hideTabTitles: IlvTabs.hideTitles, emulatedLatitude: coordinate?.0, emulatedLongitude: coordinate?.1, duressSet: IlvDuress.isSet, duressAction: IlvDuress.action)
+        return IlvPrivacyState(values: values, voicePreset: IlvVoicePreset.current, overriddenChats: IlvGhost.overriddenChatCount, deletedMarks: IlvDeletedMessages.count, editHistoryCount: IlvEditHistory.count, bubbleAlpha: IlvAppearance.bubbleAlpha, hideContactsTab: IlvTabs.hideContacts, hideTabTitles: IlvTabs.hideTitles, emulatedLatitude: coordinate?.0, emulatedLongitude: coordinate?.1, duressSet: IlvDuress.isSet, duressAction: IlvDuress.action, lockedChatIds: IlvChatLock.lockedPeerIds)
     }
 
     func value(_ option: IlvPrivacyOption) -> Bool {
@@ -707,8 +748,10 @@ private func ilvPage(of section: IlvPrivacySection) -> IlvPage {
         return .media
     case .appearance, .bubbleAlpha, .tabs:
         return .appearance
-    case .duress, .network, .calls:
+    case .duress, .network, .calls, .lockedChats:
         return .security
+    case .stories:
+        return .messages
     case .battery:
         return .battery
     case .location, .tools:
@@ -736,11 +779,11 @@ private func ilvRootEntries(state: IlvPrivacyState) -> [IlvPrivacyEntry] {
     return entries
 }
 
-private func ilvPrivacyEntries(state: IlvPrivacyState, showCallsTab: Bool, page: IlvPage) -> [IlvPrivacyEntry] {
+private func ilvPrivacyEntries(state: IlvPrivacyState, showCallsTab: Bool, lockedChats: [(Int64, String)], page: IlvPage) -> [IlvPrivacyEntry] {
     if page == .root {
         return ilvRootEntries(state: state)
     }
-    return ilvAllSettingsEntries(state: state, showCallsTab: showCallsTab).filter { entry in
+    return ilvAllSettingsEntries(state: state, showCallsTab: showCallsTab, lockedChats: lockedChats).filter { entry in
         guard let section = IlvPrivacySection(rawValue: entry.section) else {
             return false
         }
@@ -748,7 +791,7 @@ private func ilvPrivacyEntries(state: IlvPrivacyState, showCallsTab: Bool, page:
     }
 }
 
-private func ilvAllSettingsEntries(state: IlvPrivacyState, showCallsTab: Bool) -> [IlvPrivacyEntry] {
+private func ilvAllSettingsEntries(state: IlvPrivacyState, showCallsTab: Bool, lockedChats: [(Int64, String)]) -> [IlvPrivacyEntry] {
     let strings = IlvStrings()
     var entries: [IlvPrivacyEntry] = []
 
@@ -829,6 +872,20 @@ private func ilvAllSettingsEntries(state: IlvPrivacyState, showCallsTab: Bool) -
     entries.append(.choice(283, .duress, .duressAction(.logout), strings.duressLogout, state.duressAction == .logout))
     entries.append(.choice(284, .duress, .duressAction(.deleteAccounts), strings.duressDelete, state.duressAction == .deleteAccounts))
     entries.append(.footer(299, .duress, strings.duressFooter))
+
+    entries.append(.header(100, .stories, strings.storiesHeader))
+    entries.append(.toggle(101, .stories, .hideStories, strings.label(.hideStories), state.value(.hideStories)))
+    entries.append(.toggle(102, .stories, .downloadStories, strings.label(.downloadStories), state.value(.downloadStories)))
+    entries.append(.footer(119, .stories, strings.storiesFooter))
+
+    entries.append(.header(400, .lockedChats, strings.lockedChatsHeader))
+    var lockedId: Int32 = 401
+    for (peerId, title) in lockedChats {
+        entries.append(.lockedChat(lockedId, peerId, title))
+        lockedId += 1
+    }
+    entries.append(.action(498, .lockedChats, .lockChat, strings.lockChat))
+    entries.append(.footer(499, .lockedChats, strings.lockedChatsFooter))
 
     entries.append(.header(360, .battery, strings.batteryHeader))
     entries.append(.action(361, .battery, .applyBatterySaving, strings.batteryApply))
@@ -999,18 +1056,50 @@ private func ilvSettingsController(context: AccountContext, page: IlvPage) -> Vi
             })
         case .openEnergySettings:
             pushControllerImpl?(energySavingSettingsScreen(context: context))
+        case .lockChat:
+            let selection = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.doNotSearchMessages], hasContactSelector: false, title: strings.lockChat))
+            selection.peerSelected = { [weak selection] peer, _ in
+                selection?.dismiss()
+                IlvChatLock.setLocked(peer.id, true)
+                refresh()
+            }
+            pushControllerImpl?(selection)
         }
     }, openPage: { page in
         pushControllerImpl?(ilvSettingsController(context: context, page: page))
     }, openURL: { url in
         context.sharedContext.applicationBindings.openUrl(url)
+    }, unlockChat: { peerId in
+        IlvChatLock.setLocked(EnginePeer.Id(peerId), false)
+        refresh()
     })
 
-    let signal = combineLatest(context.sharedContext.presentationData, statePromise.get(), showCallsTab)
+    let lockedChats: Signal<[(Int64, String)], NoError> = statePromise.get()
+    |> map { state -> [Int64] in
+        return state.lockedChatIds
+    }
+    |> distinctUntilChanged
+    |> mapToSignal { ids -> Signal<[(Int64, String)], NoError> in
+        if ids.isEmpty {
+            return .single([])
+        }
+        return context.engine.data.get(EngineDataMap(ids.map { TelegramEngine.EngineData.Item.Peer.Peer(id: EnginePeer.Id($0)) }))
+        |> map { peers -> [(Int64, String)] in
+            return ids.map { id -> (Int64, String) in
+                var title = "ID \(id)"
+                if let maybePeer = peers[EnginePeer.Id(id)], let peer = maybePeer {
+                    title = peer.compactDisplayTitle
+                }
+                return (id, title)
+            }
+        }
+    }
+
+    let signal = combineLatest(context.sharedContext.presentationData, statePromise.get(), showCallsTab, lockedChats)
     |> deliverOnMainQueue
-    |> map { presentationData, state, showCallsTab -> (ItemListControllerState, (ItemListNodeState, Any)) in
+    |> map { presentationData, state, showCallsTab, lockedChats -> (ItemListControllerState, (ItemListNodeState, Any)) in
         let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(page == .root ? "" : strings.pageTitle(page)), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
-        let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: ilvPrivacyEntries(state: state, showCallsTab: showCallsTab, page: page), style: .blocks, animateChanges: false)
+        let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: ilvPrivacyEntries(state: state, showCallsTab: showCallsTab, lockedChats: lockedChats, page: page), style: .blocks, animateChanges: false)
         return (controllerState, (listState, arguments))
     }
 
