@@ -71,8 +71,11 @@ private func ilvIsServerCopyProtected(transaction: Transaction, message: Message
     return false
 }
 
-/// The server refuses to forward messages from protected chats. Text messages are sent as new
-/// messages with the same text and formatting instead. Edit "protected-forwards".
+/// The server refuses to forward messages from protected chats and to reuse their media. Such
+/// forwards are sent as new messages instead: the text and formatting are copied, and photos,
+/// videos, voice messages and files are downloaded and uploaded again as new files. Albums stay
+/// grouped. A message that cannot be copied keeps its original forward request.
+/// Edit "ghost-sending" runs this in enqueueMessages.
 func ilvPrepareProtectedForwards(account: Account, messages: [(Bool, EnqueueMessage)]) -> Signal<[(Bool, EnqueueMessage)], NoError> {
     let hasForwards = messages.contains(where: { _, message in
         if case .forward = message {
@@ -83,21 +86,123 @@ func ilvPrepareProtectedForwards(account: Account, messages: [(Bool, EnqueueMess
     guard IlvPrivacy.isEnabled(.ignoreCopyProtection), hasForwards else {
         return .single(messages)
     }
-    return account.postbox.transaction { transaction -> [(Bool, EnqueueMessage)] in
-        return messages.map { transformed, message -> (Bool, EnqueueMessage) in
-            guard case let .forward(source, threadId, _, attributes, correlationId) = message, let sourceMessage = transaction.getMessage(source), ilvIsServerCopyProtected(transaction: transaction, message: sourceMessage) else {
-                return (transformed, message)
+    return account.postbox.transaction { transaction -> [Int: Message] in
+        var sources: [Int: Message] = [:]
+        for index in 0 ..< messages.count {
+            if case let .forward(sourceId, _, _, _, _) = messages[index].1, let source = transaction.getMessage(sourceId), ilvIsServerCopyProtected(transaction: transaction, message: source) {
+                sources[index] = source
             }
-            if sourceMessage.text.isEmpty || sourceMessage.media.contains(where: { !($0 is TelegramMediaWebpage) }) {
-                return (transformed, message)
+        }
+        return sources
+    }
+    |> mapToSignal { sources -> Signal<[(Bool, EnqueueMessage)], NoError> in
+        if sources.isEmpty {
+            return .single(messages)
+        }
+        var groupingKeys: [Int64: Int64] = [:]
+        var signals: [Signal<(Bool, EnqueueMessage), NoError>] = []
+        for index in 0 ..< messages.count {
+            let original = messages[index]
+            guard let source = sources[index], case let .forward(_, threadId, grouping, attributes, correlationId) = original.1 else {
+                signals.append(.single(original))
+                continue
             }
-            var updatedAttributes = attributes.filter { !($0 is ForwardOptionsMessageAttribute) }
-            for attribute in sourceMessage.attributes {
-                if let entities = attribute as? TextEntitiesMessageAttribute {
-                    updatedAttributes.append(TextEntitiesMessageAttribute(entities: entities.entities))
+            var localGroupingKey: Int64?
+            if case .auto = grouping, let sourceKey = source.groupingKey {
+                if let current = groupingKeys[sourceKey] {
+                    localGroupingKey = current
+                } else {
+                    let value = Int64.random(in: 1 ... Int64.max)
+                    groupingKeys[sourceKey] = value
+                    localGroupingKey = value
                 }
             }
-            return (transformed, .message(text: sourceMessage.text, attributes: updatedAttributes, inlineStickers: [:], mediaReference: nil, threadId: threadId, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: nil, correlationId: correlationId, bubbleUpEmojiOrStickersets: []))
+            signals.append(ilvCopyProtectedMessage(account: account, source: source, threadId: threadId, attributes: attributes, correlationId: correlationId, localGroupingKey: localGroupingKey)
+            |> map { copy -> (Bool, EnqueueMessage) in
+                return copy ?? original
+            })
+        }
+        return combineLatest(signals)
+    }
+}
+
+private func ilvCopyProtectedMessage(account: Account, source: Message, threadId: Int64?, attributes: [MessageAttribute], correlationId: Int64?, localGroupingKey: Int64?) -> Signal<(Bool, EnqueueMessage)?, NoError> {
+    var hideCaptions = false
+    var outgoingAttributes: [MessageAttribute] = []
+    for attribute in attributes {
+        if let options = attribute as? ForwardOptionsMessageAttribute {
+            hideCaptions = options.hideCaptions
+        } else {
+            outgoingAttributes.append(attribute)
+        }
+    }
+    let media = source.media.first(where: { !($0 is TelegramMediaWebpage) })
+    let text = hideCaptions && media != nil ? "" : source.text
+    if !text.isEmpty, let entities = source.textEntitiesAttribute?.entities, !entities.isEmpty {
+        outgoingAttributes.append(TextEntitiesMessageAttribute(entities: entities))
+    }
+    let messageAttributes = outgoingAttributes
+
+    func makeMessage(_ mediaReference: AnyMediaReference?) -> (Bool, EnqueueMessage) {
+        return (true, .message(text: text, attributes: messageAttributes, inlineStickers: [:], mediaReference: mediaReference, threadId: threadId, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: localGroupingKey, correlationId: correlationId, bubbleUpEmojiOrStickersets: []))
+    }
+
+    guard let media = media else {
+        return .single(text.isEmpty ? nil : makeMessage(nil))
+    }
+    if let image = media as? TelegramMediaImage, let largest = largestImageRepresentation(image.representations) {
+        return ilvLocalCopy(account: account, source: source, media: image, resource: largest.resource, size: nil)
+        |> map { resource -> (Bool, EnqueueMessage)? in
+            guard let resource = resource else {
+                return nil
+            }
+            let copy = TelegramMediaImage(imageId: MediaId(namespace: Namespaces.Media.LocalImage, id: Int64.random(in: Int64.min ... Int64.max)), representations: [TelegramMediaImageRepresentation(dimensions: largest.dimensions, resource: resource, progressiveSizes: [], immediateThumbnailData: nil)], immediateThumbnailData: image.immediateThumbnailData, reference: nil, partialReference: nil, flags: [])
+            return makeMessage(.standalone(media: copy))
+        }
+    } else if let file = media as? TelegramMediaFile {
+        if file.isSticker || file.isAnimatedSticker || file.isVideoSticker || file.isCustomEmoji {
+            // Stickers from packs are public documents and can be reused as they are.
+            return .single(makeMessage(.standalone(media: file)))
+        }
+        return ilvLocalCopy(account: account, source: source, media: file, resource: file.resource, size: file.size)
+        |> map { resource -> (Bool, EnqueueMessage)? in
+            guard let resource = resource else {
+                return nil
+            }
+            let copy = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: Int64.random(in: Int64.min ... Int64.max)), partialReference: nil, resource: resource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: file.immediateThumbnailData, mimeType: file.mimeType, size: file.size, attributes: file.attributes, alternativeRepresentations: [])
+            return makeMessage(.standalone(media: copy))
+        }
+    } else if media is TelegramMediaContact {
+        return .single(makeMessage(.standalone(media: media)))
+    } else if let map = media as? TelegramMediaMap, map.liveBroadcastingTimeout == nil {
+        return .single(makeMessage(.standalone(media: map)))
+    } else {
+        return .single(nil)
+    }
+}
+
+/// Downloads the resource if needed and copies it into a new local resource, which the pending
+/// message manager uploads as a new file. nil if the download fails.
+private func ilvLocalCopy(account: Account, source: Message, media: Media, resource: MediaResource, size: Int64?) -> Signal<TelegramMediaResource?, NoError> {
+    let mediaBox = account.postbox.mediaBox
+    let fetch = fetchedMediaResource(mediaBox: mediaBox, userLocation: .peer(source.id.peerId), userContentType: .other, reference: .media(media: .message(message: MessageReference(source), media: media), resource: resource))
+    let completeData = mediaBox.resourceData(resource)
+    |> filter { $0.complete }
+    |> take(1)
+    return Signal { subscriber in
+        let fetchDisposable = fetch.start(error: { _ in
+            subscriber.putNext(nil)
+            subscriber.putCompletion()
+        })
+        let dataDisposable = completeData.start(next: { _ in
+            let localResource = LocalFileMediaResource(fileId: Int64.random(in: Int64.min ... Int64.max), size: size)
+            mediaBox.copyResourceData(from: resource.id, to: localResource.id, synchronous: true)
+            subscriber.putNext(localResource)
+            subscriber.putCompletion()
+        })
+        return ActionDisposable {
+            fetchDisposable.dispose()
+            dataDisposable.dispose()
         }
     }
 }

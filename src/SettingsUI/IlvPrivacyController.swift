@@ -83,8 +83,8 @@ public struct IlvStrings {
     var contentHeader: String { return t("ЗАЩИЩЁННЫЙ КОНТЕНТ", "PROTECTED CONTENT") }
     var contentFooter: String {
         return t(
-            "В чатах и каналах с запретом копирования можно копировать текст, сохранять медиа и делать скриншоты. Пересылка оттуда работает для текстовых сообщений: они отправляются как новые; медиа сервер переслать не даёт — сохраните их. О скриншотах секретных чатов и одноразовых медиа собеседник не узнает.",
-            "In chats and channels that restrict saving content you can copy text, save media and take screenshots. Forwarding works for text messages, which are sent as new ones; the server refuses to forward media from there — save it instead. Screenshots of secret chats and view-once media are not reported."
+            "В чатах и каналах с запретом копирования можно копировать текст, сохранять медиа и делать скриншоты. Пересылка оттуда тоже работает: сообщения отправляются от вас как новые, фото, видео, голосовые и файлы скачиваются и загружаются заново. О скриншотах секретных чатов и одноразовых медиа собеседник не узнает.",
+            "In chats and channels that restrict saving content you can copy text, save media and take screenshots. Forwarding works too: messages are sent from you as new ones, and photos, videos, voice messages and files are downloaded and uploaded again. Screenshots of secret chats and view-once media are not reported."
         )
     }
     var editHistoryFooter: String {
