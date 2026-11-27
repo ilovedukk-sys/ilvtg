@@ -55,6 +55,8 @@ jobs:
           python3 ci/prepare.py telegram
           git -C telegram diff --check
           git -C telegram status --short
+      - name: Upstream source checks
+        run: python3 telegram/build-system/Make/PostboxImportCheck.py telegram
 
   build:
     needs: patches

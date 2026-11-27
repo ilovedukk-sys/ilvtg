@@ -81,7 +81,7 @@ func ilvMessageContextActions(context: AccountContext, message: EngineRawMessage
 /// with an .m4a file.
 private func ilvExportVoiceMessage(context: AccountContext, message: EngineRawMessage, file: TelegramMediaFile, controllerInteraction: ChatControllerInteraction) {
     let strings = IlvStrings()
-    let fetch = fetchedMediaResource(mediaBox: context.account.postbox.mediaBox, userLocation: .peer(message.id.peerId), userContentType: .other, reference: .media(media: .message(message: MessageReference(message), media: file), resource: file.resource))
+    let fetch = messageMediaFileInteractiveFetched(context: context, message: message, file: file, userInitiated: true)
     let signal: Signal<String?, NoError> = context.engine.resources.data(id: EngineMediaResource.Id(file.resource.id))
     |> filter { $0.isComplete }
     |> take(1)
