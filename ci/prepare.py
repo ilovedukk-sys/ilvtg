@@ -330,6 +330,8 @@ def settings_screen(t: Tree):
     # The ilvtg settings screen: a tab of its own (chat_ui) and a row in Privacy and Security.
     t.copy("privacy-screen", ROOT / "src/SettingsUI/IlvPrivacyController.swift",
            "submodules/SettingsUI/Sources/Ilv/IlvPrivacyController.swift")
+    t.copy("settings-hero", ROOT / "src/SettingsUI/IlvSettingsHeroItem.swift",
+           "submodules/SettingsUI/Sources/Ilv/IlvSettingsHeroItem.swift")
 
     f = "submodules/SettingsUI/Sources/Privacy and Security/PrivacyAndSecurityController.swift"
     t.edit("pas-argument", f,

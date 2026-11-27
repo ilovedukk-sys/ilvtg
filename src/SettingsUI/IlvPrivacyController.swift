@@ -1,5 +1,6 @@
-// ilvtg — settings screen. Settings → "ilvtg" (own row in the main list) and Settings → Privacy
-// and Security → first row.
+// ilvtg — settings. Settings → "ilvtg" (own row in the main list) and Settings → Privacy and
+// Security → first row open the main page: the app header and a list of categories, each of
+// which opens its own page.
 // Copied into submodules/SettingsUI/Sources/Ilv/ by ci/prepare.py.
 
 import Foundation
@@ -95,6 +96,29 @@ public struct IlvStrings {
     }
     func clearEditHistory(_ count: Int) -> String {
         return t("Очистить историю изменений (\(count))", "Clear edit history (\(count))")
+    }
+    var categoriesHeader: String { return t("КАТЕГОРИИ", "CATEGORIES") }
+    var linksHeader: String { return t("ССЫЛКИ", "LINKS") }
+    var sourceCode: String { return t("Исходный код", "Source code") }
+    var on: String { return t("Вкл.", "On") }
+    var off: String { return t("Выкл.", "Off") }
+    func pageTitle(_ page: IlvPage) -> String {
+        switch page {
+        case .root:
+            return "ilvtg"
+        case .ghost:
+            return t("Режим призрака", "Ghost Mode")
+        case .messages:
+            return t("Шпион", "Spy")
+        case .media:
+            return t("Голос и кружки", "Voice & Video")
+        case .appearance:
+            return t("Оформление", "Customization")
+        case .security:
+            return t("Безопасность", "Security")
+        case .tools:
+            return t("Инструменты", "Tools")
+        }
     }
     var appearanceHeader: String { return t("ОФОРМЛЕНИЕ", "APPEARANCE") }
     var appearanceFooter: String {
@@ -282,17 +306,89 @@ private final class IlvPrivacyControllerArguments {
     let setFlag: (IlvFlag, Bool) -> Void
     let choose: (IlvChoice) -> Void
     let perform: (IlvPrivacyAction) -> Void
+    let openPage: (IlvPage) -> Void
+    let openURL: (String) -> Void
 
-    init(toggle: @escaping (IlvPrivacyOption, Bool) -> Void, setGhostMode: @escaping (Bool) -> Void, setFlag: @escaping (IlvFlag, Bool) -> Void, choose: @escaping (IlvChoice) -> Void, perform: @escaping (IlvPrivacyAction) -> Void) {
+    init(toggle: @escaping (IlvPrivacyOption, Bool) -> Void, setGhostMode: @escaping (Bool) -> Void, setFlag: @escaping (IlvFlag, Bool) -> Void, choose: @escaping (IlvChoice) -> Void, perform: @escaping (IlvPrivacyAction) -> Void, openPage: @escaping (IlvPage) -> Void, openURL: @escaping (String) -> Void) {
         self.toggle = toggle
         self.setGhostMode = setGhostMode
         self.setFlag = setFlag
         self.choose = choose
         self.perform = perform
+        self.openPage = openPage
+        self.openURL = openURL
+    }
+}
+
+/// The pages of the ilvtg settings: the main page lists the others.
+public enum IlvPage: Equatable {
+    case root
+    case ghost
+    case messages
+    case media
+    case appearance
+    case security
+    case tools
+
+    static let categories: [IlvPage] = [.ghost, .messages, .media, .appearance, .security, .tools]
+
+    /// SF Symbol of the category row (the ghost page draws its own glyph).
+    var symbol: String {
+        switch self {
+        case .root, .ghost:
+            return "eye.slash"
+        case .messages:
+            return "eye.trianglebadge.exclamationmark"
+        case .media:
+            return "waveform"
+        case .appearance:
+            return "paintpalette"
+        case .security:
+            return "lock.shield"
+        case .tools:
+            return "wrench.and.screwdriver"
+        }
+    }
+}
+
+private let ilvSourceCodeURL = "https://github.com/ilovedukk-sys/ilvtg"
+
+/// Outline icon of a category row, drawn in the list's text color like the system settings.
+private func ilvCategoryIcon(_ page: IlvPage, color: UIColor) -> UIImage {
+    let size = CGSize(width: 30.0, height: 30.0)
+    return UIGraphicsImageRenderer(size: size).image { _ in
+        if page == .ghost {
+            let ghost = ilvGhostImage(color: color, size: 26.0, crossed: false)
+            ghost.draw(in: CGRect(x: 2.0, y: 2.0, width: 26.0, height: 26.0))
+            return
+        }
+        let configuration = UIImage.SymbolConfiguration(pointSize: 20.0, weight: .regular)
+        guard let glyph = UIImage(systemName: page.symbol, withConfiguration: configuration)?.withTintColor(color, renderingMode: .alwaysOriginal) else {
+            return
+        }
+        let scale = min(1.0, min(26.0 / max(1.0, glyph.size.width), 26.0 / max(1.0, glyph.size.height)))
+        let glyphSize = CGSize(width: glyph.size.width * scale, height: glyph.size.height * scale)
+        glyph.draw(in: CGRect(x: (size.width - glyphSize.width) / 2.0, y: (size.height - glyphSize.height) / 2.0, width: glyphSize.width, height: glyphSize.height))
+    }
+}
+
+private func ilvLinkIcon(color: UIColor) -> UIImage {
+    let size = CGSize(width: 30.0, height: 30.0)
+    return UIGraphicsImageRenderer(size: size).image { _ in
+        let configuration = UIImage.SymbolConfiguration(pointSize: 18.0, weight: .regular)
+        guard let glyph = UIImage(systemName: "chevron.left.forwardslash.chevron.right", withConfiguration: configuration)?.withTintColor(color, renderingMode: .alwaysOriginal) else {
+            return
+        }
+        let scale = min(1.0, 26.0 / max(1.0, glyph.size.width))
+        let glyphSize = CGSize(width: glyph.size.width * scale, height: glyph.size.height * scale)
+        glyph.draw(in: CGRect(x: (size.width - glyphSize.width) / 2.0, y: (size.height - glyphSize.height) / 2.0, width: glyphSize.width, height: glyphSize.height))
     }
 }
 
 private enum IlvPrivacySection: Int32 {
+    case hero
+    case categories
+    case links
     case ghost
     case messages
     case voice
@@ -341,6 +437,9 @@ private enum IlvChoice: Equatable {
 }
 
 private enum IlvPrivacyEntry: ItemListNodeEntry {
+    case hero(Int32, String, String)
+    case category(Int32, IlvPage, String, String)
+    case link(Int32, String, String, String)
     case header(Int32, IlvPrivacySection, String)
     case ghostMaster(Int32, String, Bool)
     case toggle(Int32, IlvPrivacySection, IlvPrivacyOption, String, Bool)
@@ -352,6 +451,12 @@ private enum IlvPrivacyEntry: ItemListNodeEntry {
 
     var section: ItemListSectionId {
         switch self {
+        case .hero:
+            return IlvPrivacySection.hero.rawValue
+        case .category:
+            return IlvPrivacySection.categories.rawValue
+        case .link:
+            return IlvPrivacySection.links.rawValue
         case let .header(_, section, _):
             return section.rawValue
         case .ghostMaster:
@@ -373,6 +478,12 @@ private enum IlvPrivacyEntry: ItemListNodeEntry {
 
     var stableId: Int32 {
         switch self {
+        case let .hero(id, _, _):
+            return id
+        case let .category(id, _, _, _):
+            return id
+        case let .link(id, _, _, _):
+            return id
         case let .header(id, _, _):
             return id
         case let .ghostMaster(id, _, _):
@@ -394,6 +505,24 @@ private enum IlvPrivacyEntry: ItemListNodeEntry {
 
     static func ==(lhs: IlvPrivacyEntry, rhs: IlvPrivacyEntry) -> Bool {
         switch lhs {
+        case let .hero(lhsId, lhsTitle, lhsSubtitle):
+            if case let .hero(rhsId, rhsTitle, rhsSubtitle) = rhs, lhsId == rhsId, lhsTitle == rhsTitle, lhsSubtitle == rhsSubtitle {
+                return true
+            } else {
+                return false
+            }
+        case let .category(lhsId, lhsPage, lhsTitle, lhsLabel):
+            if case let .category(rhsId, rhsPage, rhsTitle, rhsLabel) = rhs, lhsId == rhsId, lhsPage == rhsPage, lhsTitle == rhsTitle, lhsLabel == rhsLabel {
+                return true
+            } else {
+                return false
+            }
+        case let .link(lhsId, lhsTitle, lhsValue, lhsURL):
+            if case let .link(rhsId, rhsTitle, rhsValue, rhsURL) = rhs, lhsId == rhsId, lhsTitle == rhsTitle, lhsValue == rhsValue, lhsURL == rhsURL {
+                return true
+            } else {
+                return false
+            }
         case let .header(lhsId, lhsSection, lhsText):
             if case let .header(rhsId, rhsSection, rhsText) = rhs, lhsId == rhsId, lhsSection == rhsSection, lhsText == rhsText {
                 return true
@@ -452,6 +581,16 @@ private enum IlvPrivacyEntry: ItemListNodeEntry {
     func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
         let arguments = arguments as! IlvPrivacyControllerArguments
         switch self {
+        case let .hero(_, title, subtitle):
+            return IlvSettingsHeroItem(presentationData: presentationData, title: title, subtitle: subtitle, sectionId: self.section)
+        case let .category(_, page, title, label):
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: ilvCategoryIcon(page, color: presentationData.theme.list.itemPrimaryTextColor), title: title, label: label, sectionId: self.section, style: .blocks, action: {
+                arguments.openPage(page)
+            })
+        case let .link(_, title, value, url):
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: ilvLinkIcon(color: presentationData.theme.list.itemPrimaryTextColor), title: title, label: value, labelStyle: .coloredText(presentationData.theme.list.itemAccentColor), sectionId: self.section, style: .blocks, disclosureStyle: .none, action: {
+                arguments.openURL(url)
+            })
         case let .header(_, _, text):
             return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
         case let .ghostMaster(_, text, value):
@@ -510,7 +649,58 @@ private struct IlvPrivacyState: Equatable {
     }
 }
 
-private func ilvPrivacyEntries(state: IlvPrivacyState, showCallsTab: Bool) -> [IlvPrivacyEntry] {
+private func ilvPage(of section: IlvPrivacySection) -> IlvPage {
+    switch section {
+    case .hero, .categories, .links:
+        return .root
+    case .ghost:
+        return .ghost
+    case .messages, .content:
+        return .messages
+    case .voice, .media:
+        return .media
+    case .appearance, .bubbleAlpha, .tabs:
+        return .appearance
+    case .duress, .network:
+        return .security
+    case .location, .tools:
+        return .tools
+    }
+}
+
+private func ilvRootEntries(state: IlvPrivacyState) -> [IlvPrivacyEntry] {
+    let strings = IlvStrings()
+    var entries: [IlvPrivacyEntry] = []
+    let version = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? ""
+    entries.append(.hero(0, "ilvtg", version))
+    entries.append(.header(1, .categories, strings.categoriesHeader))
+    var id: Int32 = 2
+    for page in IlvPage.categories {
+        var label = ""
+        if page == .ghost {
+            label = IlvPrivacyOption.ghostOptions.contains(where: { state.value($0) }) ? strings.on : strings.off
+        }
+        entries.append(.category(id, page, strings.pageTitle(page), label))
+        id += 1
+    }
+    entries.append(.header(20, .links, strings.linksHeader))
+    entries.append(.link(21, strings.sourceCode, "GitHub", ilvSourceCodeURL))
+    return entries
+}
+
+private func ilvPrivacyEntries(state: IlvPrivacyState, showCallsTab: Bool, page: IlvPage) -> [IlvPrivacyEntry] {
+    if page == .root {
+        return ilvRootEntries(state: state)
+    }
+    return ilvAllSettingsEntries(state: state, showCallsTab: showCallsTab).filter { entry in
+        guard let section = IlvPrivacySection(rawValue: entry.section) else {
+            return false
+        }
+        return ilvPage(of: section) == page
+    }
+}
+
+private func ilvAllSettingsEntries(state: IlvPrivacyState, showCallsTab: Bool) -> [IlvPrivacyEntry] {
     let strings = IlvStrings()
     var entries: [IlvPrivacyEntry] = []
 
@@ -665,7 +855,7 @@ private func ilvPresentDuressPrompt(context: AccountContext, completion: @escapi
     context.sharedContext.applicationBindings.presentNativeController(alert)
 }
 
-private func ilvSettingsController(context: AccountContext) -> ViewController {
+private func ilvSettingsController(context: AccountContext, page: IlvPage) -> ViewController {
     let strings = IlvStrings()
     let statePromise = ValuePromise(IlvPrivacyState.current(), ignoreRepeated: true)
     let refresh = {
@@ -743,13 +933,17 @@ private func ilvSettingsController(context: AccountContext) -> ViewController {
             IlvEditHistory.clear()
             refresh()
         }
+    }, openPage: { page in
+        pushControllerImpl?(ilvSettingsController(context: context, page: page))
+    }, openURL: { url in
+        context.sharedContext.applicationBindings.openUrl(url)
     })
 
     let signal = combineLatest(context.sharedContext.presentationData, statePromise.get(), showCallsTab)
     |> deliverOnMainQueue
     |> map { presentationData, state, showCallsTab -> (ItemListControllerState, (ItemListNodeState, Any)) in
-        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(strings.title), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
-        let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: ilvPrivacyEntries(state: state, showCallsTab: showCallsTab), style: .blocks, animateChanges: false)
+        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(page == .root ? "" : strings.pageTitle(page)), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
+        let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: ilvPrivacyEntries(state: state, showCallsTab: showCallsTab, page: page), style: .blocks, animateChanges: false)
         return (controllerState, (listState, arguments))
     }
 
@@ -782,5 +976,5 @@ private func ilvSettingsController(context: AccountContext) -> ViewController {
 
 /// Settings → "ilvtg", and Settings → Privacy and Security → "ilvtg Privacy".
 public func ilvPrivacyController(context: AccountContext) -> ViewController {
-    return ilvSettingsController(context: context)
+    return ilvSettingsController(context: context, page: .root)
 }
