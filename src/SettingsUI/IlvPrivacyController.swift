@@ -924,6 +924,10 @@ private func ilvStartChatExport(context: AccountContext, peerId: EnginePeer.Id, 
         case let .completed(url):
             progress?.dismiss()
             let activityController = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+            activityController.completionWithItemsHandler = { _, _, _, _ in
+                // The export holds the whole chat: do not leave it in the temporary folder.
+                try? FileManager.default.removeItem(at: url)
+            }
             if let view = controller?.view {
                 activityController.popoverPresentationController?.sourceView = view
                 activityController.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1.0, height: 1.0)

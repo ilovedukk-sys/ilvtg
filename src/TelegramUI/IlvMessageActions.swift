@@ -107,7 +107,11 @@ private func ilvExportVoiceMessage(context: AccountContext, message: EngineRawMe
         guard (try? FileManager.default.copyItem(at: URL(fileURLWithPath: path), to: target)) != nil else {
             return
         }
+        try? FileManager.default.removeItem(atPath: path)
         let activityController = UIActivityViewController(activityItems: [target], applicationActivities: nil)
+        activityController.completionWithItemsHandler = { _, _, _, _ in
+            try? FileManager.default.removeItem(at: target)
+        }
         context.sharedContext.applicationBindings.presentNativeController(activityController)
     })
 }

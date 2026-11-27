@@ -264,8 +264,8 @@ public struct IlvEditVersion: Codable, Equatable {
     public let date: Int32
 }
 
-/// Earlier versions of messages edited by their authors, kept on this device in a file inside
-/// the app's protected container. Edit "edit-history" records them.
+/// Earlier versions of messages edited by their authors, kept on this device in a file that is
+/// excluded from backups. Edit "edit-history" records them.
 public enum IlvEditHistory {
     private final class Store {
         let lock = NSLock()
@@ -284,11 +284,9 @@ public enum IlvEditHistory {
     private static let versionLimit = 20
     private static let saveQueue = Queue(name: "org.ilvtg.edit-history")
 
+    /// In IlvStore's directory: excluded from backups, protected by iOS data protection.
     private static var fileURL: URL? {
-        guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            return nil
-        }
-        return base.appendingPathComponent("ilvtg", isDirectory: true).appendingPathComponent("edit-history.json")
+        return IlvStore.directory?.appendingPathComponent("edit-history.json")
     }
 
     private static func key(_ id: MessageId) -> String {
@@ -311,7 +309,6 @@ public enum IlvEditHistory {
             guard let url = fileURL, let data = try? JSONEncoder().encode(snapshot) else {
                 return
             }
-            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: nil)
             try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         }
     }

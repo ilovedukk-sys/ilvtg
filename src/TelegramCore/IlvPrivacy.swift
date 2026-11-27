@@ -13,7 +13,6 @@ import Foundation
 import Postbox
 import SwiftSignalKit
 import MtProtoKit
-import CryptoKit
 internal import TelegramApi
 
 public enum IlvPrivacyOption: String, CaseIterable {
@@ -78,14 +77,14 @@ public enum IlvPrivacyOption: String, CaseIterable {
 
 public enum IlvPrivacy {
     public static func isEnabled(_ option: IlvPrivacyOption) -> Bool {
-        if let value = UserDefaults.standard.object(forKey: option.defaultsKey) as? Bool {
+        if let value = IlvStore.shared.object(forKey: option.defaultsKey) as? Bool {
             return value
         }
         return option.defaultValue
     }
 
     public static func setEnabled(_ option: IlvPrivacyOption, _ value: Bool) {
-        UserDefaults.standard.set(value, forKey: option.defaultsKey)
+        IlvStore.shared.set(value, forKey: option.defaultsKey)
     }
 
     /// Master switch on the settings tab: on when every ghost option is on.
@@ -127,7 +126,7 @@ public enum IlvGhost {
     }
 
     private static func overrides() -> [String: Bool] {
-        return (UserDefaults.standard.dictionary(forKey: overridesKey) as? [String: Bool]) ?? [:]
+        return (IlvStore.shared.dictionary(forKey: overridesKey) as? [String: Bool]) ?? [:]
     }
 
     /// true: ghost forced on for this chat, false: forced off, nil: global settings apply.
@@ -138,7 +137,7 @@ public enum IlvGhost {
     public static func setPeerOverride(_ peerId: PeerId, _ value: Bool?) {
         var current = overrides()
         current[key(peerId)] = value
-        UserDefaults.standard.set(current, forKey: overridesKey)
+        IlvStore.shared.set(current, forKey: overridesKey)
     }
 
     /// What the ghost button in the chat header shows.
@@ -162,7 +161,7 @@ public enum IlvGhost {
     }
 
     public static func resetPeerOverrides() {
-        UserDefaults.standard.removeObject(forKey: overridesKey)
+        IlvStore.shared.removeObject(forKey: overridesKey)
     }
 
     static func isActive(_ feature: IlvGhostFeature, peerId: PeerId?) -> Bool {
@@ -281,7 +280,7 @@ public enum IlvDeletedMessages {
     private static func loadIfNeeded() {
         if !store.loaded {
             store.loaded = true
-            store.ids = UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []
+            store.ids = IlvStore.shared.stringArray(forKey: defaultsKey) ?? []
             store.set = Set(store.ids)
         }
     }
@@ -321,7 +320,7 @@ public enum IlvDeletedMessages {
             }
             store.ids.removeFirst(removed.count)
         }
-        UserDefaults.standard.set(store.ids, forKey: defaultsKey)
+        IlvStore.shared.set(store.ids, forKey: defaultsKey)
     }
 
     /// Forgets the "deleted" marks. The messages themselves stay until the chat is cleared.
@@ -331,7 +330,7 @@ public enum IlvDeletedMessages {
         store.loaded = true
         store.ids = []
         store.set = []
-        UserDefaults.standard.removeObject(forKey: defaultsKey)
+        IlvStore.shared.removeObject(forKey: defaultsKey)
     }
 }
 
@@ -386,7 +385,7 @@ public enum IlvLocationEmulation {
     private static let versionCounter = Atomic<Int>(value: 0)
 
     public static var isEnabled: Bool {
-        return UserDefaults.standard.bool(forKey: enabledKey)
+        return IlvStore.shared.bool(forKey: enabledKey)
     }
 
     /// (latitude, longitude) while emulation is on.
@@ -394,18 +393,18 @@ public enum IlvLocationEmulation {
         if !isEnabled {
             return nil
         }
-        return (UserDefaults.standard.double(forKey: latitudeKey), UserDefaults.standard.double(forKey: longitudeKey))
+        return (IlvStore.shared.double(forKey: latitudeKey), IlvStore.shared.double(forKey: longitudeKey))
     }
 
     public static func enable(latitude: Double, longitude: Double) {
-        UserDefaults.standard.set(latitude, forKey: latitudeKey)
-        UserDefaults.standard.set(longitude, forKey: longitudeKey)
-        UserDefaults.standard.set(true, forKey: enabledKey)
+        IlvStore.shared.set(latitude, forKey: latitudeKey)
+        IlvStore.shared.set(longitude, forKey: longitudeKey)
+        IlvStore.shared.set(true, forKey: enabledKey)
         notify()
     }
 
     public static func disable() {
-        UserDefaults.standard.set(false, forKey: enabledKey)
+        IlvStore.shared.set(false, forKey: enabledKey)
         notify()
     }
 
@@ -429,41 +428,45 @@ public enum IlvDuress {
         case deleteAccounts = 1
     }
 
-    private static let hashKey = "ilvtg.duress.hash"
+    private static let keychainAccount = "duress"
     private static let actionKey = "ilvtg.duress.action"
     private static let pendingDeletionKey = "ilvtg.duress.pendingDeletion"
 
-    private static func hash(_ code: String) -> String {
-        let digest = SHA256.hash(data: Data(("ilvtg-duress:" + code).utf8))
-        return digest.map { String(format: "%02x", $0) }.joined()
-    }
-
+    /// salt (16 bytes) + PBKDF2 hash (32 bytes), in the Keychain of this device only.
     public static var isSet: Bool {
-        return UserDefaults.standard.string(forKey: hashKey) != nil
+        return IlvKeychain.data(keychainAccount) != nil
     }
 
     public static func set(code: String) {
-        UserDefaults.standard.set(hash(code), forKey: hashKey)
+        let salt = IlvKeychain.randomSalt()
+        let derived = IlvKeychain.derive(code, salt: salt)
+        if derived.isEmpty {
+            return
+        }
+        IlvKeychain.set(salt + derived, keychainAccount)
     }
 
     public static func clear() {
-        UserDefaults.standard.removeObject(forKey: hashKey)
+        IlvKeychain.set(nil, keychainAccount)
     }
 
     public static var action: Action {
         get {
-            return Action(rawValue: UserDefaults.standard.integer(forKey: actionKey)) ?? .logout
+            return Action(rawValue: IlvStore.shared.integer(forKey: actionKey)) ?? .logout
         }
         set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: actionKey)
+            IlvStore.shared.set(newValue.rawValue, forKey: actionKey)
         }
     }
 
     public static func matches(_ code: String) -> Bool {
-        guard let stored = UserDefaults.standard.string(forKey: hashKey), !code.isEmpty else {
+        guard !code.isEmpty, let stored = IlvKeychain.data(keychainAccount), stored.count == 48 else {
             return false
         }
-        return stored == hash(code)
+        let salt = stored.prefix(16)
+        let expected = stored.suffix(32)
+        let derived = IlvKeychain.derive(code, salt: Data(salt))
+        return !derived.isEmpty && derived == Data(expected)
     }
 
     /// Marks every account as logged out. managedCleanupAccounts then logs each one out on the
@@ -479,7 +482,7 @@ public enum IlvDuress {
         }
         |> mapToSignal { ids -> Signal<Void, NoError> in
             if deleteAccounts {
-                UserDefaults.standard.set(ids.map { NSNumber(value: $0.int64) }, forKey: pendingDeletionKey)
+                IlvStore.shared.set(ids.map { NSNumber(value: $0.int64) }, forKey: pendingDeletionKey)
             }
             return combineLatest(ids.map { logoutFromAccount(id: $0, accountManager: accountManager, alreadyLoggedOutRemotely: false) })
             |> map { _ in Void() }
@@ -488,12 +491,12 @@ public enum IlvDuress {
 
     /// Whether this account must be deleted (not only logged out); forgets the mark.
     static func takePendingDeletion(_ id: AccountRecordId) -> Bool {
-        var pending = (UserDefaults.standard.array(forKey: pendingDeletionKey) as? [NSNumber]) ?? []
+        var pending = (IlvStore.shared.array(forKey: pendingDeletionKey) as? [NSNumber]) ?? []
         guard let index = pending.firstIndex(where: { $0.int64Value == id.int64 }) else {
             return false
         }
         pending.remove(at: index)
-        UserDefaults.standard.set(pending, forKey: pendingDeletionKey)
+        IlvStore.shared.set(pending, forKey: pendingDeletionKey)
         return true
     }
 }
@@ -522,11 +525,11 @@ public enum IlvAppearance {
     /// Opacity of message bubbles, 1.0 = opaque.
     public static var bubbleAlpha: Double {
         get {
-            let value = UserDefaults.standard.double(forKey: bubbleAlphaKey)
+            let value = IlvStore.shared.double(forKey: bubbleAlphaKey)
             return value > 0.0 ? min(1.0, value) : 1.0
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: bubbleAlphaKey)
+            IlvStore.shared.set(newValue, forKey: bubbleAlphaKey)
         }
     }
 }
@@ -540,20 +543,20 @@ public enum IlvTabs {
 
     public static var hideContacts: Bool {
         get {
-            return UserDefaults.standard.bool(forKey: hideContactsKey)
+            return IlvStore.shared.bool(forKey: hideContactsKey)
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: hideContactsKey)
+            IlvStore.shared.set(newValue, forKey: hideContactsKey)
             notify()
         }
     }
 
     public static var hideTitles: Bool {
         get {
-            return UserDefaults.standard.bool(forKey: hideTitlesKey)
+            return IlvStore.shared.bool(forKey: hideTitlesKey)
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: hideTitlesKey)
+            IlvStore.shared.set(newValue, forKey: hideTitlesKey)
             notify()
         }
     }
@@ -576,7 +579,7 @@ public enum IlvChatLock {
     private static let key = "ilvtg.lockedChats"
 
     public static var lockedPeerIds: [Int64] {
-        return (UserDefaults.standard.array(forKey: key) as? [NSNumber])?.map { $0.int64Value } ?? []
+        return (IlvStore.shared.array(forKey: key) as? [NSNumber])?.map { $0.int64Value } ?? []
     }
 
     public static func isLocked(_ peerId: PeerId) -> Bool {
@@ -588,6 +591,6 @@ public enum IlvChatLock {
         if value {
             ids.append(peerId.toInt64())
         }
-        UserDefaults.standard.set(ids.map { NSNumber(value: $0) }, forKey: key)
+        IlvStore.shared.set(ids.map { NSNumber(value: $0) }, forKey: key)
     }
 }

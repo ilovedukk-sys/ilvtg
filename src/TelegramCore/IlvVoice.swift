@@ -33,10 +33,10 @@ public enum IlvVoicePreset: Int, CaseIterable {
 
     public static var current: IlvVoicePreset {
         get {
-            return IlvVoicePreset(rawValue: UserDefaults.standard.integer(forKey: defaultsKey)) ?? .off
+            return IlvVoicePreset(rawValue: IlvStore.shared.integer(forKey: defaultsKey)) ?? .off
         }
         set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey)
+            IlvStore.shared.set(newValue.rawValue, forKey: defaultsKey)
         }
     }
 }

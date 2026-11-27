@@ -103,7 +103,7 @@ def ghost(t: Tree, name: str, relpath: str, method: str, feature: str, peer: str
 
 
 def privacy_layer(t: Tree):
-    for name in ["IlvPrivacy", "IlvVoice", "IlvChatExport", "IlvAyuFeatures"]:
+    for name in ["IlvStore", "IlvPrivacy", "IlvVoice", "IlvChatExport", "IlvAyuFeatures"]:
         t.copy("core-" + name, ROOT / f"src/TelegramCore/{name}.swift", CORE + f"Ilv/{name}.swift")
 
     # Single choke point for telemetry and sponsored content: both request entry points of
@@ -465,13 +465,33 @@ def location_emulation(t: Tree):
            "        if let location = ilvEmulatedLocation(locations.first) {\n")
     t.append("location-helper", f,
              "\n"
-             "/// ilvtg: location emulation. TelegramCore's IlvLocationEmulation writes these keys.\n"
+             "/// ilvtg: location emulation. TelegramCore's IlvLocationEmulation keeps the point in IlvStore's\n"
+             "/// file (Application Support/ilvtg/store.plist); it is read again only when the file changes.\n"
+             "private var ilvEmulationCache: (Date, CLLocationCoordinate2D?)?\n"
+             "\n"
+             "private func ilvEmulatedCoordinate() -> CLLocationCoordinate2D? {\n"
+             "    guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {\n"
+             "        return nil\n"
+             "    }\n"
+             "    let url = base.appendingPathComponent(\"ilvtg/store.plist\")\n"
+             "    guard let modified = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date else {\n"
+             "        return nil\n"
+             "    }\n"
+             "    if let cache = ilvEmulationCache, cache.0 == modified {\n"
+             "        return cache.1\n"
+             "    }\n"
+             "    var coordinate: CLLocationCoordinate2D?\n"
+             "    if let data = try? Data(contentsOf: url), let values = (try? PropertyListSerialization.propertyList(from: data, options: [], format: nil)) as? [String: Any], (values[\"ilvtg.location.enabled\"] as? NSNumber)?.boolValue == true, let latitude = values[\"ilvtg.location.lat\"] as? NSNumber, let longitude = values[\"ilvtg.location.lon\"] as? NSNumber {\n"
+             "        coordinate = CLLocationCoordinate2D(latitude: latitude.doubleValue, longitude: longitude.doubleValue)\n"
+             "    }\n"
+             "    ilvEmulationCache = (modified, coordinate)\n"
+             "    return coordinate\n"
+             "}\n"
+             "\n"
              "func ilvEmulatedLocation(_ location: CLLocation?) -> CLLocation? {\n"
-             "    let defaults = UserDefaults.standard\n"
-             "    guard defaults.bool(forKey: \"ilvtg.location.enabled\") else {\n"
+             "    guard let coordinate = ilvEmulatedCoordinate() else {\n"
              "        return location\n"
              "    }\n"
-             "    let coordinate = CLLocationCoordinate2D(latitude: defaults.double(forKey: \"ilvtg.location.lat\"), longitude: defaults.double(forKey: \"ilvtg.location.lon\"))\n"
              "    return CLLocation(coordinate: coordinate, altitude: location?.altitude ?? 0.0, horizontalAccuracy: 10.0, verticalAccuracy: -1.0, timestamp: Date())\n"
              "}\n")
 
@@ -854,6 +874,20 @@ def stories_and_locks(t: Tree, app: dict):
 
 
 def sideload_compat(t: Tree):
+    # The app passcode is kept in the Keychain under the App Group as access group. Re-signed
+    # sideloaded installs usually lack the App Group, so saving the passcode fails; use the app's
+    # own access group (TEAMID.bundle id) instead when the App Group is not available.
+    t.edit("passcode-keychain-fallback", "submodules/PasscodeCore/Sources/Passcode.swift",
+           "        guard let configuration = self.configuration else { throw PasscodeError.unavailable }\n"
+           "        return configuration.appGroupIdentifier\n",
+           "        guard let configuration = self.configuration else { throw PasscodeError.unavailable }\n"
+           "        #if !os(macOS)\n"
+           "        if configuration.processRole == .mainApp, FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: configuration.appGroupIdentifier) == nil, let group = self.resolvedPrivateAccessGroup ?? self.resolvePrivateAccessGroup?(), !group.isEmpty {\n"
+           "            return group\n"
+           "        }\n"
+           "        #endif\n"
+           "        return configuration.appGroupIdentifier\n")
+
     # Sideloading tools re-sign the app, often without the App Group entitlement. Upstream then
     # stops launching before the window is shown ("Error 2" on a hidden window = black screen).
     # The main app does not need a shared container without extensions: fall back to a private
