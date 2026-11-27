@@ -162,6 +162,13 @@ public struct IlvStrings {
         )
     }
     var bubbleAlphaHeader: String { return t("ПРОЗРАЧНОСТЬ СООБЩЕНИЙ", "MESSAGE TRANSPARENCY") }
+    var deletedAlphaHeader: String { return t("ПРОЗРАЧНОСТЬ УДАЛЁННЫХ СООБЩЕНИЙ", "DELETED MESSAGE TRANSPARENCY") }
+    var deletedAlphaFooter: String {
+        return t(
+            "Сохранённые удалённые сообщения становятся полупрозрачными, чтобы их было видно среди остальных. Применяется сразу в открытых чатах при следующем обновлении сообщения или после повторного открытия чата.",
+            "Kept deleted messages are drawn translucent so they stand out from the rest of the chat. Applies when the message next updates or after reopening the chat."
+        )
+    }
     func bubbleAlpha(_ value: Double) -> String {
         if value >= 0.999 {
             return t("Без прозрачности", "Opaque")
@@ -469,6 +476,7 @@ private enum IlvPrivacySection: Int32 {
     case calls
     case stories
     case lockedChats
+    case deletedAlpha
 }
 
 private enum IlvPrivacyAction: Equatable {
@@ -504,6 +512,7 @@ private enum IlvFlag: Equatable {
 private enum IlvChoice: Equatable {
     case voice(IlvVoicePreset)
     case bubbleAlpha(Double)
+    case deletedAlpha(Double)
     case duressAction(IlvDuress.Action)
 }
 
@@ -714,6 +723,7 @@ private struct IlvPrivacyState: Equatable {
     var deletedMarks: Int
     var editHistoryCount: Int
     var bubbleAlpha: Double
+    var deletedAlpha: Double
     var hideContactsTab: Bool
     var hideTabTitles: Bool
     var emulatedLatitude: Double?
@@ -728,7 +738,7 @@ private struct IlvPrivacyState: Equatable {
             values[option] = IlvPrivacy.isEnabled(option)
         }
         let coordinate = IlvLocationEmulation.coordinate
-        return IlvPrivacyState(values: values, voicePreset: IlvVoicePreset.current, overriddenChats: IlvGhost.overriddenChatCount, deletedMarks: IlvDeletedMessages.count, editHistoryCount: IlvEditHistory.count, bubbleAlpha: IlvAppearance.bubbleAlpha, hideContactsTab: IlvTabs.hideContacts, hideTabTitles: IlvTabs.hideTitles, emulatedLatitude: coordinate?.0, emulatedLongitude: coordinate?.1, duressSet: IlvDuress.isSet, duressAction: IlvDuress.action, lockedChatIds: IlvChatLock.lockedPeerIds)
+        return IlvPrivacyState(values: values, voicePreset: IlvVoicePreset.current, overriddenChats: IlvGhost.overriddenChatCount, deletedMarks: IlvDeletedMessages.count, editHistoryCount: IlvEditHistory.count, bubbleAlpha: IlvAppearance.bubbleAlpha, deletedAlpha: IlvAppearance.deletedMessageAlpha, hideContactsTab: IlvTabs.hideContacts, hideTabTitles: IlvTabs.hideTitles, emulatedLatitude: coordinate?.0, emulatedLongitude: coordinate?.1, duressSet: IlvDuress.isSet, duressAction: IlvDuress.action, lockedChatIds: IlvChatLock.lockedPeerIds)
     }
 
     func value(_ option: IlvPrivacyOption) -> Bool {
@@ -750,7 +760,7 @@ private func ilvPage(of section: IlvPrivacySection) -> IlvPage {
         return .appearance
     case .duress, .network, .calls, .lockedChats:
         return .security
-    case .stories:
+    case .stories, .deletedAlpha:
         return .messages
     case .battery:
         return .battery
@@ -819,6 +829,14 @@ private func ilvAllSettingsEntries(state: IlvPrivacyState, showCallsTab: Bool, l
         entries.append(.action(38, .messages, .clearEditHistory, strings.clearEditHistory(state.editHistoryCount)))
     }
     entries.append(.footer(39, .messages, strings.messagesFooter + "\n\n" + strings.editHistoryFooter))
+
+    entries.append(.header(140, .deletedAlpha, strings.deletedAlphaHeader))
+    var deletedAlphaId: Int32 = 141
+    for value in IlvAppearance.deletedMessageAlphaPresets {
+        entries.append(.choice(deletedAlphaId, .deletedAlpha, .deletedAlpha(value), strings.bubbleAlpha(value), abs(state.deletedAlpha - value) < 0.001))
+        deletedAlphaId += 1
+    }
+    entries.append(.footer(159, .deletedAlpha, strings.deletedAlphaFooter))
 
     entries.append(.header(80, .content, strings.contentHeader))
     entries.append(.toggle(81, .content, .ignoreCopyProtection, strings.label(.ignoreCopyProtection), state.value(.ignoreCopyProtection)))
@@ -1016,6 +1034,8 @@ private func ilvSettingsController(context: AccountContext, page: IlvPage) -> Vi
             IlvVoicePreset.current = preset
         case let .bubbleAlpha(value):
             IlvAppearance.bubbleAlpha = value
+        case let .deletedAlpha(value):
+            IlvAppearance.deletedMessageAlpha = value
         case let .duressAction(action):
             IlvDuress.action = action
         }

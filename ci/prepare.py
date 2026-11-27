@@ -188,6 +188,14 @@ def message_keeping(t: Tree):
            "            var updateMessage = false\n")
 
     # "deleted 12:34" next to kept messages.
+    # Kept deleted messages are drawn translucent (Settings → ilvtg → Spy).
+    t.edit("deleted-alpha", "submodules/TelegramUI/Components/Chat/ChatMessageItemView/Sources/ChatMessageItemView.swift",
+           "    open func setupItem(_ item: ChatMessageItem, synchronousLoad: Bool) {\n"
+           "        self.item = item\n",
+           "    open func setupItem(_ item: ChatMessageItem, synchronousLoad: Bool) {\n"
+           "        self.item = item\n"
+           "        self.alpha = IlvDeletedMessages.contains(item.message.id) ? CGFloat(IlvAppearance.deletedMessageAlpha) : 1.0\n")
+
     t.edit("deleted-label", "submodules/TelegramUI/Components/Chat/ChatMessageDateAndStatusNode/Sources/StringForMessageTimestampStatus.swift",
            "public func stringForMessageTimestampStatus(\n",
            "public func stringForMessageTimestampStatus(\n"

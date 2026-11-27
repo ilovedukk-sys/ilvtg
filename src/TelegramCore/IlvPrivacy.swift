@@ -522,6 +522,25 @@ public enum IlvAppearance {
 
     public static let bubbleAlphaPresets: [Double] = [1.0, 0.85, 0.7, 0.5, 0.3]
 
+    private static let deletedMessageAlphaKey = "ilvtg.deletedMessageAlpha"
+
+    public static let deletedMessageAlphaPresets: [Double] = [1.0, 0.75, 0.5, 0.3]
+
+    /// Opacity of messages kept after the other side deleted them. Half-transparent by default,
+    /// so they stand out from the rest of the chat.
+    public static var deletedMessageAlpha: Double {
+        get {
+            if IlvStore.shared.object(forKey: deletedMessageAlphaKey) == nil {
+                return 0.5
+            }
+            let value = IlvStore.shared.double(forKey: deletedMessageAlphaKey)
+            return value > 0.0 ? min(1.0, value) : 1.0
+        }
+        set {
+            IlvStore.shared.set(newValue, forKey: deletedMessageAlphaKey)
+        }
+    }
+
     /// Opacity of message bubbles, 1.0 = opaque.
     public static var bubbleAlpha: Double {
         get {
