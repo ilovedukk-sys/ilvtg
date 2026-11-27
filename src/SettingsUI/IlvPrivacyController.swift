@@ -118,7 +118,25 @@ public struct IlvStrings {
             return t("Безопасность", "Security")
         case .tools:
             return t("Инструменты", "Tools")
+        case .battery:
+            return t("Батарея", "Battery")
         }
+    }
+    var batteryHeader: String { return t("ЭКОНОМИЯ БАТАРЕИ", "BATTERY SAVING") }
+    var batteryApply: String { return t("Применить экономные настройки", "Apply battery-saving settings") }
+    var batteryApplied: String { return t("Экономные настройки применены", "Battery-saving settings applied") }
+    var batteryOpen: String { return t("Энергосбережение Telegram…", "Telegram power saving…") }
+    var batteryFooter: String {
+        return t(
+            "В ilvtg по умолчанию: видео в чатах не запускаются сами, стикеры и эмодзи проигрываются один раз, приложение не работает в фоне дольше нужного и ничего не скачивает в фоне, по Wi-Fi автозагрузка «средняя» (без предзагрузки больших видео), по сотовой сети — «низкая», режим энергосбережения включается сам при заряде 30 %. Если приложение уже было установлено, нажмите «Применить экономные настройки», чтобы перенести это в свои настройки. Остальное можно тонко настроить в «Энергосбережении Telegram».",
+            "ilvtg defaults: videos in chats don't autoplay, stickers and emoji play once, the app doesn't keep working in the background longer than needed and downloads nothing in the background, auto-download is \"medium\" on Wi-Fi (no large video preloading) and \"low\" on cellular, and power saving turns on by itself at 30% battery. If the app was already installed, tap \"Apply battery-saving settings\" to bring your settings in line. Fine-tune the rest in Telegram's power saving."
+        )
+    }
+    var callsFooter: String {
+        return t(
+            "Перед каждым исходящим звонком приложение спросит подтверждение — случайное нажатие на трубку никого не разбудит.",
+            "The app asks before every outgoing call, so an accidental tap on the call button doesn't ring anyone."
+        )
     }
     var appearanceHeader: String { return t("ОФОРМЛЕНИЕ", "APPEARANCE") }
     var appearanceFooter: String {
@@ -211,6 +229,10 @@ public struct IlvStrings {
             return t("Не сообщать о скриншотах", "Don't report screenshots")
         case .keepEditHistory:
             return t("Сохранять историю изменений", "Keep edit history")
+        case .confirmCalls:
+            return t("Подтверждать звонки", "Confirm calls")
+        case .hidePremiumPromos:
+            return t("Скрыть Premium и звёзды", "Hide Premium and Stars")
         }
     }
 
@@ -329,8 +351,9 @@ public enum IlvPage: Equatable {
     case appearance
     case security
     case tools
+    case battery
 
-    static let categories: [IlvPage] = [.ghost, .messages, .media, .appearance, .security, .tools]
+    static let categories: [IlvPage] = [.ghost, .messages, .media, .appearance, .battery, .security, .tools]
 
     /// SF Symbol of the category row (the ghost page draws its own glyph).
     var symbol: String {
@@ -347,11 +370,30 @@ public enum IlvPage: Equatable {
             return "lock.shield"
         case .tools:
             return "wrench.and.screwdriver"
+        case .battery:
+            return "battery.75percent"
         }
     }
 }
 
 private let ilvSourceCodeURL = "https://github.com/ilovedukk-sys/ilvtg"
+
+/// The battery-saving values ilvtg uses as defaults, applied to existing settings.
+private func ilvBatterySavingSettings(_ current: MediaAutoDownloadSettings) -> MediaAutoDownloadSettings {
+    var settings = current
+    settings.energyUsageSettings.autoplayVideo = false
+    settings.energyUsageSettings.loopStickers = false
+    settings.energyUsageSettings.loopEmoji = false
+    settings.energyUsageSettings.extendBackgroundWork = false
+    settings.energyUsageSettings.autodownloadInBackground = false
+    settings.energyUsageSettings.activationThreshold = max(settings.energyUsageSettings.activationThreshold, 30)
+    settings.downloadInBackground = false
+    settings.cellular = MediaAutoDownloadConnection(enabled: true, preset: .low, custom: nil)
+    if settings.wifi.preset == .high {
+        settings.wifi.preset = .medium
+    }
+    return settings
+}
 
 /// Outline icon of a category row, drawn in the list's text color like the system settings.
 private func ilvCategoryIcon(_ page: IlvPage, color: UIColor) -> UIImage {
@@ -401,6 +443,8 @@ private enum IlvPrivacySection: Int32 {
     case duress
     case tools
     case network
+    case battery
+    case calls
 }
 
 private enum IlvPrivacyAction: Equatable {
@@ -411,12 +455,14 @@ private enum IlvPrivacyAction: Equatable {
     case setDuress
     case clearDuress
     case clearEditHistory
+    case applyBatterySaving
+    case openEnergySettings
 
     var isDestructive: Bool {
         switch self {
         case .resetChats, .clearDeletedMarks, .clearDuress, .clearEditHistory:
             return true
-        case .exportChat, .disableLocation, .setDuress:
+        case .exportChat, .disableLocation, .setDuress, .applyBatterySaving, .openEnergySettings:
             return false
         }
     }
@@ -661,8 +707,10 @@ private func ilvPage(of section: IlvPrivacySection) -> IlvPage {
         return .media
     case .appearance, .bubbleAlpha, .tabs:
         return .appearance
-    case .duress, .network:
+    case .duress, .network, .calls:
         return .security
+    case .battery:
+        return .battery
     case .location, .tools:
         return .tools
     }
@@ -749,6 +797,7 @@ private func ilvAllSettingsEntries(state: IlvPrivacyState, showCallsTab: Bool) -
     entries.append(.toggle(201, .appearance, .cherryAccent, strings.label(.cherryAccent), state.value(.cherryAccent)))
     entries.append(.toggle(202, .appearance, .streamerMode, strings.label(.streamerMode), state.value(.streamerMode)))
     entries.append(.toggle(203, .appearance, .showPeerId, strings.label(.showPeerId), state.value(.showPeerId)))
+    entries.append(.toggle(204, .appearance, .hidePremiumPromos, strings.label(.hidePremiumPromos), state.value(.hidePremiumPromos)))
     entries.append(.footer(219, .appearance, strings.appearanceFooter + "\n\n" + strings.streamerFooter))
 
     entries.append(.header(220, .bubbleAlpha, strings.bubbleAlphaHeader))
@@ -780,6 +829,15 @@ private func ilvAllSettingsEntries(state: IlvPrivacyState, showCallsTab: Bool) -
     entries.append(.choice(283, .duress, .duressAction(.logout), strings.duressLogout, state.duressAction == .logout))
     entries.append(.choice(284, .duress, .duressAction(.deleteAccounts), strings.duressDelete, state.duressAction == .deleteAccounts))
     entries.append(.footer(299, .duress, strings.duressFooter))
+
+    entries.append(.header(360, .battery, strings.batteryHeader))
+    entries.append(.action(361, .battery, .applyBatterySaving, strings.batteryApply))
+    entries.append(.action(362, .battery, .openEnergySettings, strings.batteryOpen))
+    entries.append(.footer(379, .battery, strings.batteryFooter))
+
+    entries.append(.header(380, .calls, strings.t("ЗВОНКИ", "CALLS")))
+    entries.append(.toggle(381, .calls, .confirmCalls, strings.label(.confirmCalls), state.value(.confirmCalls)))
+    entries.append(.footer(399, .calls, strings.callsFooter))
 
     entries.append(.header(300, .tools, strings.toolsHeader))
     entries.append(.action(301, .tools, .exportChat, strings.exportChat))
@@ -932,6 +990,15 @@ private func ilvSettingsController(context: AccountContext, page: IlvPage) -> Vi
         case .clearEditHistory:
             IlvEditHistory.clear()
             refresh()
+        case .applyBatterySaving:
+            let _ = (updateMediaDownloadSettingsInteractively(accountManager: accountManager, { settings in
+                return ilvBatterySavingSettings(settings)
+            })
+            |> deliverOnMainQueue).start(completed: {
+                showToastImpl?(strings.batteryApplied)
+            })
+        case .openEnergySettings:
+            pushControllerImpl?(energySavingSettingsScreen(context: context))
         }
     }, openPage: { page in
         pushControllerImpl?(ilvSettingsController(context: context, page: page))

@@ -51,12 +51,16 @@ public enum IlvPrivacyOption: String, CaseIterable {
     case hideScreenshots
     /// Earlier versions of edited messages are kept.
     case keepEditHistory
+    /// A confirmation before every outgoing call.
+    case confirmCalls
+    /// Premium, Stars and gift rows are hidden in Settings.
+    case hidePremiumPromos
 
     public var defaultValue: Bool {
         switch self {
-        case .blockSponsored, .showChatGhostButton, .keepDeletedMessages, .keepSelfDestructing, .replayViewOnce, .showPeerId, .cherryAccent, .ghostSending, .ignoreCopyProtection, .hideScreenshots, .keepEditHistory:
+        case .blockSponsored, .showChatGhostButton, .keepDeletedMessages, .keepSelfDestructing, .replayViewOnce, .showPeerId, .cherryAccent, .ghostSending, .ignoreCopyProtection, .hideScreenshots, .keepEditHistory, .confirmCalls:
             return true
-        case .hideReadReceipts, .hideStoryViews, .hideOnlineStatus, .hideTyping, .blurFacesInVideoMessages, .streamerMode:
+        case .hideReadReceipts, .hideStoryViews, .hideOnlineStatus, .hideTyping, .blurFacesInVideoMessages, .streamerMode, .hidePremiumPromos:
             return false
         }
     }

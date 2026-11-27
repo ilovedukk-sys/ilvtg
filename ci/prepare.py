@@ -723,6 +723,71 @@ def ayu_features(t: Tree):
            "        let isCopyProtected = chatPresentationInterfaceState.copyProtectionEnabled || message.isCopyProtected()\n")
 
 
+def battery(t: Tree):
+    """Battery-saving defaults. They apply to settings the user has not changed; Settings →
+    ilvtg → Battery can apply them to existing settings too."""
+    f = "submodules/TelegramUIPreferences/Sources/MediaAutoDownloadSettings.swift"
+    t.edit("battery-energy-defaults", f,
+           "        return EnergyUsageSettings(\n"
+           "            activationThreshold: 15,\n"
+           "            autoplayVideo: true,\n"
+           "            autoplayGif: true,\n"
+           "            loopStickers: true,\n"
+           "            loopEmoji: isCapable,\n"
+           "            fullTranslucency: isCapable,\n"
+           "            extendBackgroundWork: true,\n"
+           "            autodownloadInBackground: true\n"
+           "        )\n",
+           "        // ilvtg: videos don't autoplay, stickers and emoji play once, no extended background\n"
+           "        // work or background downloads, power saving from 30% battery.\n"
+           "        return EnergyUsageSettings(\n"
+           "            activationThreshold: 30,\n"
+           "            autoplayVideo: false,\n"
+           "            autoplayGif: true,\n"
+           "            loopStickers: false,\n"
+           "            loopEmoji: false,\n"
+           "            fullTranslucency: isCapable,\n"
+           "            extendBackgroundWork: false,\n"
+           "            autodownloadInBackground: false\n"
+           "        )\n")
+    # Wi-Fi: "medium" instead of "high" (no 10 MB video preloading); nothing downloads in the
+    # background. Cellular is set to "low" in privacy_defaults.
+    t.edit("battery-autodownload", f,
+           "wifi: MediaAutoDownloadConnection(enabled: true, preset: .high, custom: nil), downloadInBackground: true,",
+           "wifi: MediaAutoDownloadConnection(enabled: true, preset: .medium, custom: nil), downloadInBackground: false,")
+
+
+def extras(t: Tree):
+    # Confirmation before outgoing calls.
+    t.copy("confirm-calls-source", ROOT / "src/TelegramUI/IlvCallConfirm.swift",
+           "submodules/TelegramUI/Sources/Ilv/IlvCallConfirm.swift")
+    t.edit("confirm-calls", "submodules/TelegramUI/Sources/AccountContext.swift",
+           "    public func requestCall(peerId: EnginePeer.Id, isVideo: Bool, completion: @escaping () -> Void) {\n"
+           "        guard let callResult = ",
+           "    public func requestCall(peerId: EnginePeer.Id, isVideo: Bool, completion: @escaping () -> Void) {\n"
+           "        if IlvPrivacy.isEnabled(.confirmCalls) {\n"
+           "            ilvConfirmCall(context: self, peerId: peerId, isVideo: isVideo, confirmed: { [weak self] in\n"
+           "                self?.ilvPerformRequestCall(peerId: peerId, isVideo: isVideo, completion: completion)\n"
+           "            })\n"
+           "            return\n"
+           "        }\n"
+           "        self.ilvPerformRequestCall(peerId: peerId, isVideo: isVideo, completion: completion)\n"
+           "    }\n"
+           "\n"
+           "    func ilvPerformRequestCall(peerId: EnginePeer.Id, isVideo: Bool, completion: @escaping () -> Void) {\n"
+           "        guard let callResult = ")
+
+    # Premium, Stars and gift rows hidden in Settings.
+    t.edit("hide-premium", "submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoSettingsItems.swift",
+           "    for section in SettingsSection.allCases {\n"
+           "        if let sectionItems = items[section], !sectionItems.isEmpty {\n",
+           "    for section in SettingsSection.allCases {\n"
+           "        if section == .payment && IlvPrivacy.isEnabled(.hidePremiumPromos) {\n"
+           "            continue\n"
+           "        }\n"
+           "        if let sectionItems = items[section], !sectionItems.isEmpty {\n")
+
+
 def sideload_compat(t: Tree):
     # Sideloading tools re-sign the app, often without the App Group entitlement. Upstream then
     # stops launching before the window is shown ("Error 2" on a hidden window = black screen).
@@ -812,6 +877,8 @@ def main():
     appearance(t)
     fake_passcode(t)
     ayu_features(t)
+    battery(t)
+    extras(t)
     chat_ui(t)
     sideload_compat(t)
     branding(t, app)
