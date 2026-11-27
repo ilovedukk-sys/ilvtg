@@ -45,7 +45,7 @@ def patch_rules_apple(source: Path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("source", type=Path)
-    parser.add_argument("--configuration", default="release_arm64", choices=["release_arm64", "debug_arm64", "release_sim_arm64", "debug_sim_arm64"])
+    parser.add_argument("--configuration", default="release_arm64", choices=["release_arm64", "debug_arm64"])
     parser.add_argument("--cache-dir", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
@@ -117,8 +117,7 @@ def main():
     built = out / "Telegram.ipa"
     if not built.is_file():
         die("the build finished without Telegram.ipa")
-    is_simulator = "_sim_" in args.configuration
-    ipa = out / (app["display_name"] + ("-simulator.ipa" if is_simulator else ".ipa"))
+    ipa = out / (app["display_name"] + ".ipa")
     built.replace(ipa)
     (out / "Telegram.DSYMs.zip").unlink(missing_ok=True)
 
@@ -129,18 +128,6 @@ def main():
         if binary[:4] != b"\xcf\xfa\xed\xfe" or int.from_bytes(binary[4:8], "little") != 0x0100000C:
             die("the main executable is not arm64")
         extensions = sorted({n.split("/")[3] for n in archive.namelist() if n.startswith(f"Payload/{app_dir}/PlugIns/") and n.count("/") >= 4})
-        if is_simulator:
-            # Cloud simulators (Expo Simulators, `xcrun simctl install`) take the .app itself:
-            # repack Payload/<name>.app as a zip with the .app at its root.
-            simulator_zip = out / (app["display_name"] + "-simulator.app.zip")
-            with zipfile.ZipFile(simulator_zip, "w", zipfile.ZIP_DEFLATED) as packed:
-                for item in archive.infolist():
-                    if not item.filename.startswith(f"Payload/{app_dir}/") or item.is_dir():
-                        continue
-                    target = zipfile.ZipInfo(item.filename[len("Payload/"):], item.date_time)
-                    target.external_attr = item.external_attr
-                    target.compress_type = zipfile.ZIP_DEFLATED
-                    packed.writestr(target, archive.read(item.filename))
 
     manifest = {
         "app": app["display_name"],
@@ -163,7 +150,7 @@ def main():
     if summary:
         with open(summary, "a") as handle:
             handle.write(f"## {app['display_name']} {manifest['version']} ({manifest['build']})\n\n")
-            handle.write(f"- IPA: {manifest['ipa_bytes'] / 1024 ** 2:.1f} MiB, unsigned, arm64{' simulator' if is_simulator else ''}\n")
+            handle.write(f"- IPA: {manifest['ipa_bytes'] / 1024 ** 2:.1f} MiB, unsigned, arm64\n")
             handle.write(f"- Telegram API credentials: {'configured' if has_credentials else '**missing: login will not work**'}\n")
             handle.write(f"- Extensions: {', '.join(extensions) if extensions else 'none'}\n")
             handle.write(f"- SHA-256: `{manifest['sha256']}`\n")
