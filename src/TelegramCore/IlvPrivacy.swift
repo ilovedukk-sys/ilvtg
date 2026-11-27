@@ -43,10 +43,18 @@ public enum IlvPrivacyOption: String, CaseIterable {
     case showPeerId
     /// Cherry instead of blue as the default accent color of the built-in themes.
     case cherryAccent
+    /// While "hide online" is on, messages are sent as scheduled a few seconds ahead.
+    case ghostSending
+    /// "Restrict saving content" is ignored on this device: copy, save, screenshots.
+    case ignoreCopyProtection
+    /// Screenshots of secret chats and view-once media are not reported to the sender.
+    case hideScreenshots
+    /// Earlier versions of edited messages are kept.
+    case keepEditHistory
 
     public var defaultValue: Bool {
         switch self {
-        case .blockSponsored, .showChatGhostButton, .keepDeletedMessages, .keepSelfDestructing, .replayViewOnce, .showPeerId, .cherryAccent:
+        case .blockSponsored, .showChatGhostButton, .keepDeletedMessages, .keepSelfDestructing, .replayViewOnce, .showPeerId, .cherryAccent, .ghostSending, .ignoreCopyProtection, .hideScreenshots, .keepEditHistory:
             return true
         case .hideReadReceipts, .hideStoryViews, .hideOnlineStatus, .hideTyping, .blurFacesInVideoMessages, .streamerMode:
             return false
@@ -456,6 +464,7 @@ public enum IlvDuress {
     public static func trigger(accountManager: AccountManager<TelegramAccountManagerTypes>) {
         let deleteAccounts = action == .deleteAccounts
         IlvDeletedMessages.clearMarks()
+        IlvEditHistory.clear()
         IlvGhost.resetPeerOverrides()
         let _ = (accountManager.transaction { transaction -> [AccountRecordId] in
             return transaction.getRecords().map { $0.id }

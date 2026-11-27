@@ -102,7 +102,7 @@ def ghost(t: Tree, name: str, relpath: str, method: str, feature: str, peer: str
 
 
 def privacy_layer(t: Tree):
-    for name in ["IlvPrivacy", "IlvVoice", "IlvChatExport"]:
+    for name in ["IlvPrivacy", "IlvVoice", "IlvChatExport", "IlvAyuFeatures"]:
         t.copy("core-" + name, ROOT / f"src/TelegramCore/{name}.swift", CORE + f"Ilv/{name}.swift")
 
     # Single choke point for telemetry and sponsored content: both request entry points of
@@ -615,6 +615,112 @@ def fake_passcode(t: Tree):
            "                })\n")
 
 
+def ayu_features(t: Tree):
+    """Ideas from AyuGram, implemented here without any third-party server."""
+    core = "submodules/TelegramCore/Sources/"
+
+    # Sending without going online, and forwards from protected chats sent as new messages.
+    t.edit("ghost-sending", core + "PendingMessages/EnqueueMessage.swift",
+           "public func enqueueMessages(account: Account, peerId: PeerId, messages: [EnqueueMessage]) -> Signal<[MessageId?], NoError> {\n"
+           "    let signal: Signal<[(Bool, EnqueueMessage)], NoError>\n"
+           "    if let transformOutgoingMessageMedia = account.transformOutgoingMessageMedia {\n"
+           "        signal = opportunisticallyTransformOutgoingMedia(network: account.network, postbox: account.postbox, transformOutgoingMessageMedia: transformOutgoingMessageMedia, messages: messages, userInteractive: true)\n"
+           "    } else {\n"
+           "        signal = .single(messages.map { (false, $0) })\n"
+           "    }\n"
+           "    return signal\n"
+           "    |> mapToSignal { messages -> Signal<[MessageId?], NoError> in\n",
+           "public func enqueueMessages(account: Account, peerId: PeerId, messages: [EnqueueMessage]) -> Signal<[MessageId?], NoError> {\n"
+           "    let signal: Signal<[(Bool, EnqueueMessage)], NoError>\n"
+           "    if let transformOutgoingMessageMedia = account.transformOutgoingMessageMedia {\n"
+           "        signal = opportunisticallyTransformOutgoingMedia(network: account.network, postbox: account.postbox, transformOutgoingMessageMedia: transformOutgoingMessageMedia, messages: messages, userInteractive: true)\n"
+           "    } else {\n"
+           "        signal = .single(messages.map { (false, $0) })\n"
+           "    }\n"
+           "    return signal\n"
+           "    |> mapToSignal { messages in ilvPrepareProtectedForwards(account: account, messages: messages) }\n"
+           "    |> mapToSignal { messages in ilvPrepareGhostSending(account: account, peerId: peerId, messages: messages) }\n"
+           "    |> mapToSignal { messages -> Signal<[MessageId?], NoError> in\n")
+
+    # Edit history: the stored text before a server edit replaces it.
+    t.edit("edit-history", core + "State/AccountStateManagementUtils.swift",
+           "                    return .update(mergedServerMessageUpdate(previous: previousMessage, updated: message))\n"
+           "                })\n"
+           "                if let generatedEvent = generatedEvent {\n",
+           "                    ilvRecordEdit(previous: previousMessage, updatedText: message.text)\n"
+           "                    return .update(mergedServerMessageUpdate(previous: previousMessage, updated: message))\n"
+           "                })\n"
+           "                if let generatedEvent = generatedEvent {\n")
+
+    # "Restrict saving content" ignored on this device (copy, save, screenshots, sharing).
+    t.edit("copy-protection-message", core + "Utils/MessageUtils.swift",
+           "    func isCopyProtected() -> Bool {\n"
+           "        if self.flags.contains(.CopyProtected) {\n",
+           "    func isCopyProtected() -> Bool {\n"
+           "        if IlvPrivacy.isEnabled(.ignoreCopyProtection) {\n"
+           "            return false\n"
+           "        }\n"
+           "        if self.flags.contains(.CopyProtected) {\n")
+    t.edit("copy-protection-peer", core + "Utils/PeerUtils.swift",
+           "    var isCopyProtectionEnabled: Bool {\n"
+           "        switch self {\n",
+           "    var isCopyProtectionEnabled: Bool {\n"
+           "        if IlvPrivacy.isEnabled(.ignoreCopyProtection) {\n"
+           "            return false\n"
+           "        }\n"
+           "        switch self {\n")
+    t.edit("copy-protection-data", core + "TelegramEngine/Data/PeersData.swift",
+           "                guard let peer = peerViewMainPeer(view) else {\n"
+           "                    return false\n"
+           "                }\n"
+           "                if let cachedPeerData = view.cachedData as? CachedUserData {\n"
+           "                    return cachedPeerData.flags.contains(.copyProtectionEnabled)\n",
+           "                guard let peer = peerViewMainPeer(view) else {\n"
+           "                    return false\n"
+           "                }\n"
+           "                if IlvPrivacy.isEnabled(.ignoreCopyProtection) {\n"
+           "                    return false\n"
+           "                }\n"
+           "                if let cachedPeerData = view.cachedData as? CachedUserData {\n"
+           "                    return cachedPeerData.flags.contains(.copyProtectionEnabled)\n")
+    private_chat = "cachedUserData.flags.contains(.copyProtectionEnabled) || cachedUserData.flags.contains(.myCopyProtectionEnabled)"
+    bypassed = "!IlvPrivacy.isEnabled(.ignoreCopyProtection) && (" + private_chat + ")"
+    t.edit("copy-protection-chat", "submodules/TelegramUI/Sources/ChatControllerContentData.swift",
+           "copyProtectionEnabled = " + private_chat + "\n",
+           "copyProtectionEnabled = " + bypassed + "\n")
+    t.edit("copy-protection-history", "submodules/TelegramUI/Sources/ChatHistoryListNode.swift",
+           "isCopyProtectionEnabled = " + private_chat + "\n",
+           "isCopyProtectionEnabled = " + bypassed + "\n")
+    t.edit("copy-protection-gallery", "submodules/GalleryUI/Sources/GalleryController.swift",
+           "return (message, " + private_chat + ")\n",
+           "return (message, " + bypassed + ")\n")
+    t.edit("copy-protection-profile", "submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoData.swift",
+           "if let cachedUserData = data.cachedData as? CachedUserData, " + private_chat + " {\n",
+           "if let cachedUserData = data.cachedData as? CachedUserData, " + bypassed + " {\n")
+
+    # Screenshots are not reported: secret chats and view-once media in cloud chats.
+    t.edit("screenshots-secret", core + "SecretChats/SetSecretChatMessageAutoremoveTimeoutInteractively.swift",
+           "func _internal_addSecretChatMessageScreenshot(account: Account, peerId: PeerId) -> Signal<Void, NoError> {\n",
+           "func _internal_addSecretChatMessageScreenshot(account: Account, peerId: PeerId) -> Signal<Void, NoError> {\n"
+           "    if IlvPrivacy.isEnabled(.hideScreenshots) {\n"
+           "        return .complete()\n"
+           "    }\n")
+    t.edit("screenshots-view-once", "submodules/GalleryUI/Sources/SecretMediaPreviewController.swift",
+           "                if let strongSelf = self, strongSelf.traceVisibility() {\n"
+           "                    if strongSelf.messageId.peerId.namespace == Namespaces.Peer.CloudUser {\n",
+           "                if let strongSelf = self, strongSelf.traceVisibility() {\n"
+           "                    if IlvPrivacy.isEnabled(.hideScreenshots) {\n"
+           "                    } else if strongSelf.messageId.peerId.namespace == Namespaces.Peer.CloudUser {\n")
+
+    # Context menu: edit history and "mark chat as read".
+    t.copy("message-context-actions-source", ROOT / "src/TelegramUI/IlvMessageActions.swift",
+           "submodules/TelegramUI/Sources/Ilv/IlvMessageActions.swift")
+    t.edit("message-context-actions", "submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift",
+           "        let isCopyProtected = chatPresentationInterfaceState.copyProtectionEnabled || message.isCopyProtected()\n",
+           "        actions.append(contentsOf: ilvMessageContextActions(context: context, message: message, controllerInteraction: controllerInteraction))\n"
+           "        let isCopyProtected = chatPresentationInterfaceState.copyProtectionEnabled || message.isCopyProtected()\n")
+
+
 def sideload_compat(t: Tree):
     # Sideloading tools re-sign the app, often without the App Group entitlement. Upstream then
     # stops launching before the window is shown ("Error 2" on a hidden window = black screen).
@@ -703,6 +809,7 @@ def main():
     location_emulation(t)
     appearance(t)
     fake_passcode(t)
+    ayu_features(t)
     chat_ui(t)
     sideload_compat(t)
     branding(t, app)

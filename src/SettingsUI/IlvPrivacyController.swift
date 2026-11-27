@@ -74,6 +74,28 @@ public struct IlvStrings {
         )
     }
 
+    var ghostSendingFooter: String {
+        return t(
+            "«Отправлять, не выходя в сеть» работает вместе с «Не показывать «в сети»»: сообщение уходит как отложенное на 12 секунд, и сервер публикует его сам, не отмечая вас в сети. До публикации оно лежит в «Отложенных сообщениях» чата.",
+            "\"Send without going online\" works together with \"Don't show online\": a message is sent as scheduled 12 seconds ahead and the server publishes it itself without marking you online. Until then it is in the chat's scheduled messages."
+        )
+    }
+    var contentHeader: String { return t("ЗАЩИЩЁННЫЙ КОНТЕНТ", "PROTECTED CONTENT") }
+    var contentFooter: String {
+        return t(
+            "В чатах и каналах с запретом копирования можно копировать текст, сохранять медиа и делать скриншоты. Пересылка оттуда работает для текстовых сообщений: они отправляются как новые; медиа сервер переслать не даёт — сохраните их. О скриншотах секретных чатов и одноразовых медиа собеседник не узнает.",
+            "In chats and channels that restrict saving content you can copy text, save media and take screenshots. Forwarding works for text messages, which are sent as new ones; the server refuses to forward media from there — save it instead. Screenshots of secret chats and view-once media are not reported."
+        )
+    }
+    var editHistoryFooter: String {
+        return t(
+            "Если собеседник изменит сообщение, прежний текст сохранится: долгое нажатие на сообщение → «История изменений». В режиме призрака там же есть «Отметить чат прочитанным».",
+            "When someone edits a message, the earlier text is kept: long-press the message → \"Edit history\". In ghost mode the same menu has \"Mark chat as read\"."
+        )
+    }
+    func clearEditHistory(_ count: Int) -> String {
+        return t("Очистить историю изменений (\(count))", "Clear edit history (\(count))")
+    }
     var appearanceHeader: String { return t("ОФОРМЛЕНИЕ", "APPEARANCE") }
     var appearanceFooter: String {
         return t(
@@ -157,6 +179,14 @@ public struct IlvStrings {
             return t("Показывать ID в профиле", "Show ID in profiles")
         case .cherryAccent:
             return t("Вишнёвый цвет интерфейса", "Cherry accent color")
+        case .ghostSending:
+            return t("Отправлять, не выходя в сеть", "Send without going online")
+        case .ignoreCopyProtection:
+            return t("Обходить запрет копирования", "Ignore copy restrictions")
+        case .hideScreenshots:
+            return t("Не сообщать о скриншотах", "Don't report screenshots")
+        case .keepEditHistory:
+            return t("Сохранять историю изменений", "Keep edit history")
         }
     }
 
@@ -267,6 +297,7 @@ private enum IlvPrivacySection: Int32 {
     case messages
     case voice
     case media
+    case content
     case appearance
     case bubbleAlpha
     case tabs
@@ -283,10 +314,11 @@ private enum IlvPrivacyAction: Equatable {
     case disableLocation
     case setDuress
     case clearDuress
+    case clearEditHistory
 
     var isDestructive: Bool {
         switch self {
-        case .resetChats, .clearDeletedMarks, .clearDuress:
+        case .resetChats, .clearDeletedMarks, .clearDuress, .clearEditHistory:
             return true
         case .exportChat, .disableLocation, .setDuress:
             return false
@@ -455,6 +487,7 @@ private struct IlvPrivacyState: Equatable {
     var voicePreset: IlvVoicePreset
     var overriddenChats: Int
     var deletedMarks: Int
+    var editHistoryCount: Int
     var bubbleAlpha: Double
     var hideContactsTab: Bool
     var hideTabTitles: Bool
@@ -469,7 +502,7 @@ private struct IlvPrivacyState: Equatable {
             values[option] = IlvPrivacy.isEnabled(option)
         }
         let coordinate = IlvLocationEmulation.coordinate
-        return IlvPrivacyState(values: values, voicePreset: IlvVoicePreset.current, overriddenChats: IlvGhost.overriddenChatCount, deletedMarks: IlvDeletedMessages.count, bubbleAlpha: IlvAppearance.bubbleAlpha, hideContactsTab: IlvTabs.hideContacts, hideTabTitles: IlvTabs.hideTitles, emulatedLatitude: coordinate?.0, emulatedLongitude: coordinate?.1, duressSet: IlvDuress.isSet, duressAction: IlvDuress.action)
+        return IlvPrivacyState(values: values, voicePreset: IlvVoicePreset.current, overriddenChats: IlvGhost.overriddenChatCount, deletedMarks: IlvDeletedMessages.count, editHistoryCount: IlvEditHistory.count, bubbleAlpha: IlvAppearance.bubbleAlpha, hideContactsTab: IlvTabs.hideContacts, hideTabTitles: IlvTabs.hideTitles, emulatedLatitude: coordinate?.0, emulatedLongitude: coordinate?.1, duressSet: IlvDuress.isSet, duressAction: IlvDuress.action)
     }
 
     func value(_ option: IlvPrivacyOption) -> Bool {
@@ -484,23 +517,32 @@ private func ilvPrivacyEntries(state: IlvPrivacyState, showCallsTab: Bool) -> [I
     entries.append(.header(0, .ghost, strings.ghostHeader))
     entries.append(.ghostMaster(1, strings.ghostMaster, IlvPrivacyOption.ghostOptions.allSatisfy { state.value($0) }))
     var id: Int32 = 2
-    for option in IlvPrivacyOption.ghostOptions + [.showChatGhostButton] {
+    for option in IlvPrivacyOption.ghostOptions + [.ghostSending, .showChatGhostButton] {
         entries.append(.toggle(id, .ghost, option, strings.label(option), state.value(option)))
         id += 1
     }
     if state.overriddenChats > 0 {
         entries.append(.action(18, .ghost, .resetChats, strings.resetChats(state.overriddenChats)))
     }
-    entries.append(.footer(19, .ghost, strings.ghostFooter))
+    entries.append(.footer(19, .ghost, strings.ghostFooter + "\n\n" + strings.ghostSendingFooter))
 
     entries.append(.header(20, .messages, strings.messagesHeader))
     entries.append(.toggle(21, .messages, .keepDeletedMessages, strings.label(.keepDeletedMessages), state.value(.keepDeletedMessages)))
     entries.append(.toggle(22, .messages, .keepSelfDestructing, strings.label(.keepSelfDestructing), state.value(.keepSelfDestructing)))
     entries.append(.toggle(23, .messages, .replayViewOnce, strings.label(.replayViewOnce), state.value(.replayViewOnce)))
+    entries.append(.toggle(24, .messages, .keepEditHistory, strings.label(.keepEditHistory), state.value(.keepEditHistory)))
     if state.deletedMarks > 0 {
-        entries.append(.action(38, .messages, .clearDeletedMarks, strings.clearDeletedMarks(state.deletedMarks)))
+        entries.append(.action(37, .messages, .clearDeletedMarks, strings.clearDeletedMarks(state.deletedMarks)))
     }
-    entries.append(.footer(39, .messages, strings.messagesFooter))
+    if state.editHistoryCount > 0 {
+        entries.append(.action(38, .messages, .clearEditHistory, strings.clearEditHistory(state.editHistoryCount)))
+    }
+    entries.append(.footer(39, .messages, strings.messagesFooter + "\n\n" + strings.editHistoryFooter))
+
+    entries.append(.header(80, .content, strings.contentHeader))
+    entries.append(.toggle(81, .content, .ignoreCopyProtection, strings.label(.ignoreCopyProtection), state.value(.ignoreCopyProtection)))
+    entries.append(.toggle(82, .content, .hideScreenshots, strings.label(.hideScreenshots), state.value(.hideScreenshots)))
+    entries.append(.footer(99, .content, strings.contentFooter))
 
     entries.append(.header(40, .voice, strings.voiceHeader))
     id = 41
@@ -696,6 +738,9 @@ private func ilvSettingsController(context: AccountContext) -> ViewController {
             })
         case .clearDuress:
             IlvDuress.clear()
+            refresh()
+        case .clearEditHistory:
+            IlvEditHistory.clear()
             refresh()
         }
     })
