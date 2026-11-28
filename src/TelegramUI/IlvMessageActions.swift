@@ -17,6 +17,7 @@ import AppBundle
 import ChatControllerInteraction
 import SettingsUI
 import ConvertOpusToAAC
+import SaveToCameraRoll
 
 private func ilvEditHistoryText(message: EngineRawMessage, versions: [IlvEditVersion], strings: IlvStrings) -> String {
     let formatter = DateFormatter()
@@ -61,6 +62,27 @@ func ilvMessageContextActions(context: AccountContext, message: EngineRawMessage
             |> deliverOnMainQueue).startStandalone(next: { success in
                 let text = success ? strings.t("Собеседник увидит, что вы прочитали чат", "The chat is marked as read for the sender") : strings.t("Не удалось отметить чат прочитанным", "Couldn't mark the chat as read")
                 controllerInteraction.displayUndo(.info(title: nil, text: text, timeout: nil, customUndoText: nil))
+            })
+        })))
+    }
+
+    // View-once and self-destructing photos and videos have no "Save" in Telegram's own menu.
+    if IlvPrivacy.isEnabled(.ignoreCopyProtection), message.minAutoremoveOrClearTimeout != nil, let media = message.media.first(where: { media in
+        if media is TelegramMediaImage {
+            return true
+        }
+        if let file = media as? TelegramMediaFile, file.isVideo {
+            return true
+        }
+        return false
+    }) {
+        items.append(.action(ContextMenuActionItem(text: strings.t("Сохранить в галерею", "Save to Gallery"), icon: { theme in
+            return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Save"), color: theme.actionSheet.primaryTextColor)
+        }, action: { _, f in
+            f(.default)
+            let _ = (saveToCameraRoll(context: context, userLocation: .peer(message.id.peerId), mediaReference: .message(message: MessageReference(message), media: media))
+            |> deliverOnMainQueue).startStandalone(completed: {
+                controllerInteraction.displayUndo(.info(title: nil, text: strings.t("Сохранено в галерею", "Saved to Gallery"), timeout: nil, customUndoText: nil))
             })
         })))
     }

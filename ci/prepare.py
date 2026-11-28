@@ -743,6 +743,18 @@ def ayu_features(t: Tree):
            "                    if IlvPrivacy.isEnabled(.hideScreenshots) {\n"
            "                    } else if strongSelf.messageId.peerId.namespace == Namespaces.Peer.CloudUser {\n")
 
+    # Screenshots: the capture block every protected view uses is lifted while the option is on.
+    # IlvStore mirrors the option to UserDefaults for this ObjC module (default on).
+    t.edit("screenshots-allowed", "submodules/UIKitRuntimeUtils/Source/UIKitRuntimeUtils/UIKitUtils.m",
+           "void setLayerDisableScreenshots(CALayer * _Nonnull layer, bool disableScreenshots) {\n",
+           "void setLayerDisableScreenshots(CALayer * _Nonnull layer, bool disableScreenshots) {\n"
+           "    if (disableScreenshots) {\n"
+           "        NSNumber *ilvAllowScreenshots = [[NSUserDefaults standardUserDefaults] objectForKey:@\"ilvtg.privacy.hideScreenshots\"];\n"
+           "        if (ilvAllowScreenshots == nil || [ilvAllowScreenshots boolValue]) {\n"
+           "            disableScreenshots = false;\n"
+           "        }\n"
+           "    }\n")
+
     # Context menu: edit history and "mark chat as read".
     t.copy("message-context-actions-source", ROOT / "src/TelegramUI/IlvMessageActions.swift",
            "submodules/TelegramUI/Sources/Ilv/IlvMessageActions.swift")

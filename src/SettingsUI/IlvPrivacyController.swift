@@ -84,8 +84,8 @@ public struct IlvStrings {
     var contentHeader: String { return t("ЗАЩИЩЁННЫЙ КОНТЕНТ", "PROTECTED CONTENT") }
     var contentFooter: String {
         return t(
-            "В чатах и каналах с запретом копирования можно копировать текст, сохранять медиа и делать скриншоты. Пересылка оттуда тоже работает: сообщения отправляются от вас как новые, фото, видео, голосовые и файлы скачиваются и загружаются заново. О скриншотах секретных чатов и одноразовых медиа собеседник не узнает.",
-            "In chats and channels that restrict saving content you can copy text, save media and take screenshots. Forwarding works too: messages are sent from you as new ones, and photos, videos, voice messages and files are downloaded and uploaded again. Screenshots of secret chats and view-once media are not reported."
+            "В чатах и каналах с запретом копирования можно копировать текст, сохранять медиа и делать скриншоты. Пересылка оттуда тоже работает: сообщения отправляются от вас как новые, фото, видео, голосовые и файлы скачиваются и загружаются заново. «Разрешить скриншоты» снимает блокировку снимков экрана (в том числе у одноразовых фото и видео и в секретных чатах), и собеседник не получает уведомление о скриншоте. Одноразовые фото и видео можно сохранить: долгое нажатие → «Сохранить в галерею».",
+            "In chats and channels that restrict saving content you can copy text, save media and take screenshots. Forwarding works too: messages are sent from you as new ones, and photos, videos, voice messages and files are downloaded and uploaded again. \"Allow screenshots\" lifts the screenshot block (view-once photos and videos and secret chats included) and the other side is not notified. View-once photos and videos can be saved: long-press → \"Save to Gallery\"."
         )
     }
     var editHistoryFooter: String {
@@ -249,7 +249,7 @@ public struct IlvStrings {
         case .ignoreCopyProtection:
             return t("Обходить запрет копирования", "Ignore copy restrictions")
         case .hideScreenshots:
-            return t("Не сообщать о скриншотах", "Don't report screenshots")
+            return t("Разрешить скриншоты", "Allow screenshots")
         case .keepEditHistory:
             return t("Сохранять историю изменений", "Keep edit history")
         case .confirmCalls:

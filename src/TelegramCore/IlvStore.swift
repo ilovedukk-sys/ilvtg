@@ -20,8 +20,9 @@ public final class IlvStore {
     private let saveQueue = DispatchQueue(label: "org.ilvtg.store")
 
     /// Keys other modules (which cannot link TelegramCore) still read from UserDefaults. They hold
-    /// no personal data: bubble opacity and whether tab titles are shown.
-    private static let mirroredToUserDefaults: Set<String> = ["ilvtg.bubbleAlpha", "ilvtg.tabs.hideTitles"]
+    /// no personal data: bubble opacity, whether tab titles are shown and whether screenshots are
+    /// allowed (read by UIKitRuntimeUtils, edit "screenshots-allowed").
+    private static let mirroredToUserDefaults: Set<String> = ["ilvtg.bubbleAlpha", "ilvtg.tabs.hideTitles", "ilvtg.privacy.hideScreenshots"]
 
     /// Application Support/ilvtg, created on demand and excluded from backups.
     public static var directory: URL? {
@@ -50,6 +51,12 @@ public final class IlvStore {
         self.loaded = true
         if let url = IlvStore.fileURL, let data = try? Data(contentsOf: url), let object = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
             self.values = object
+            // Modules without TelegramCore read these from UserDefaults: keep them in step.
+            for key in IlvStore.mirroredToUserDefaults {
+                if let value = object[key] {
+                    UserDefaults.standard.set(value, forKey: key)
+                }
+            }
             return
         }
         // First launch with the store: take over what earlier versions kept in UserDefaults.
